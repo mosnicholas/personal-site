@@ -56,6 +56,8 @@ module.exports = {
     ],
     'react/jsx-filename-extension': [1, { extensions: ['.ts', '.tsx'] }],
     'object-curly-newline': 'off',
+    'no-unused-vars': 'warn',
+    'react/jsx-props-no-spreading': 'off',
   },
   parser: '@typescript-eslint/parser',
   parserOptions: {

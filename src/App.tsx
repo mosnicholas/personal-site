@@ -1,9 +1,11 @@
-import { Center, Heading } from '@chakra-ui/react';
+import { Center } from '@chakra-ui/react';
+
+import TextScrambler from './TextScrambler';
 
 function App() {
   return (
-    <Center h="100vh" bgColor="cyan.800" color="white">
-      <Heading>hello</Heading>
+    <Center h="100vh" bgColor="blackAlpha.900" color="gray.50">
+      <TextScrambler text="nicholas moschopoulos" />
     </Center>
   );
 }

@@ -3,12 +3,15 @@ import * as React from 'react';
 import { ChakraProvider } from '@chakra-ui/react';
 import ReactDOM from 'react-dom';
 
+import '@fontsource/roboto-mono';
+
 import App from './App';
 import reportWebVitals from './reportWebVitals';
+import theme from './theme';
 
 ReactDOM.render(
   <React.StrictMode>
-    <ChakraProvider>
+    <ChakraProvider theme={theme}>
       <App />
     </ChakraProvider>
   </React.StrictMode>,
