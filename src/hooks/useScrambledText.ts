@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { getNewText, getRandomString } from '../utils/textScramble';
+import { getNewText, getRandomString } from 'utils/textScramble';
 
 const useScrambledText = (text: string) => {
   const [scrambledText, setScrambledText] = useState('');

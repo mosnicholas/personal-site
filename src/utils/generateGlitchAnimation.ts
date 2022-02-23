@@ -36,20 +36,22 @@ const glitchBottom = keyframes`
   }
 `;
 
-export default {
+const generateGlitchAnimation = (content: string) => ({
   animation: `${glitch} 0.5s linear infinite`,
   _before: {
-    content: "'nicholas moschopoulos'",
+    content: `'${content}'`,
     position: 'absolute',
     left: '0',
     animation: `${glitchTop} 0.5s linear infinite`,
     clipPath: 'polygon(0 0, 100% 0, 100% 33%, 0 33%)',
   },
   _after: {
-    content: "'nicholas moschopoulos'",
+    content: `'${content}'`,
     position: 'absolute',
     left: '0',
     animation: `${glitchBottom} 1.5s linear infinite`,
     clipPath: 'polygon(0 67%, 100% 67%, 100% 100%, 0 100%)',
   },
-};
+});
+
+export default generateGlitchAnimation;

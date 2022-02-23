@@ -58,6 +58,14 @@ module.exports = {
     'object-curly-newline': 'off',
     'no-unused-vars': 'warn',
     'react/jsx-props-no-spreading': 'off',
+    'react/function-component-definition': [
+      2,
+      {
+        namedComponents: 'arrow-function',
+        unnamedComponents: 'arrow-function',
+      },
+    ],
+    'react/jsx-one-expression-per-line': 'off',
   },
   parser: '@typescript-eslint/parser',
   parserOptions: {

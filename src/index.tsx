@@ -4,10 +4,11 @@ import { ChakraProvider } from '@chakra-ui/react';
 import ReactDOM from 'react-dom';
 
 import '@fontsource/roboto-mono';
+import '@fontsource/roboto';
 
 import App from './App';
 import reportWebVitals from './reportWebVitals';
-import theme from './theme';
+import theme from './utils/theme';
 
 ReactDOM.render(
   <React.StrictMode>
