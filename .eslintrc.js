@@ -66,6 +66,7 @@ module.exports = {
       },
     ],
     'react/jsx-one-expression-per-line': 'off',
+    'react/no-unstable-nested-components': [2, { allowAsProps: true }],
   },
   parser: '@typescript-eslint/parser',
   parserOptions: {

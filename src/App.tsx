@@ -1,6 +1,10 @@
 import { useState } from 'react';
 
-import { Center, ScaleFade } from '@chakra-ui/react';
+import { Center, ScaleFade, useDisclosure } from '@chakra-ui/react';
+import { KBarProvider } from 'kbar';
+
+import KBarSearchBar from 'components/KBarSearch';
+import useKBarActions from 'hooks/useKBarActions';
 
 import TextScrambler from './components/TextScrambler';
 import Page from './Page';
@@ -8,6 +12,8 @@ import Page from './Page';
 const App = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [renderPage, setRenderPage] = useState(false);
+  const actions = useKBarActions();
+  const { isOpen, onOpen, onClose } = useDisclosure();
 
   return (
     <>
@@ -25,7 +31,19 @@ const App = () => {
         </Center>
       )}
 
-      <Page renderPage={renderPage} />
+      <KBarProvider
+        actions={actions}
+        options={{
+          callbacks: {
+            onOpen,
+            onClose,
+            onSelectAction: onClose,
+          },
+        }}
+      >
+        <KBarSearchBar isOpen={isOpen} />
+        <Page renderPage={renderPage} />
+      </KBarProvider>
     </>
   );
 };

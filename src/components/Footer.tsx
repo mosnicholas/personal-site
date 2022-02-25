@@ -25,6 +25,9 @@ const Footer = () => (
       <Link isExternal href="https://github.com/mosnicholas/">
         github
       </Link>
+      <Link isExternal href="mailto:nico.moschopoulos@gmail.com?subject=Hey!">
+        email
+      </Link>
     </HStack>
   </Flex>
 );

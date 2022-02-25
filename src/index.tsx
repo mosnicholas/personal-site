@@ -2,9 +2,12 @@ import * as React from 'react';
 
 import { ChakraProvider } from '@chakra-ui/react';
 import ReactDOM from 'react-dom';
+import { QueryClientProvider } from 'react-query';
 
 import '@fontsource/roboto-mono';
 import '@fontsource/roboto';
+
+import queryClient from 'utils/queryClient';
 
 import App from './App';
 import reportWebVitals from './reportWebVitals';
@@ -12,9 +15,11 @@ import theme from './utils/theme';
 
 ReactDOM.render(
   <React.StrictMode>
-    <ChakraProvider theme={theme}>
-      <App />
-    </ChakraProvider>
+    <QueryClientProvider client={queryClient}>
+      <ChakraProvider theme={theme}>
+        <App />
+      </ChakraProvider>
+    </QueryClientProvider>
   </React.StrictMode>,
   document.getElementById('root'),
 );
