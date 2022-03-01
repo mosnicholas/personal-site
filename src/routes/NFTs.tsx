@@ -1,14 +1,9 @@
-import { Box, Center, SimpleGrid, SlideFade } from '@chakra-ui/react';
-
+import ImageGrid from 'components/Layout/ImageGrid';
 import NFTCard, { NFTLoadingCard } from 'components/NFTCard';
 import useNFTs from 'hooks/useNFTs';
 import { NFT } from 'utils/types';
 
 const LOADING_CARDS = Array(3).fill(0).map(Math.random);
-
-type NFTsProps = {
-  renderPage: boolean;
-};
 
 type NFTCardsProps = {
   isLoading: boolean;
@@ -42,19 +37,13 @@ const NFTCards = ({ isLoading, nfts }: NFTCardsProps) => {
   return null;
 };
 
-const NFTs = ({ renderPage }: NFTsProps) => {
+const NFTs = () => {
   const { data, isLoading } = useNFTs();
 
   return (
-    <SlideFade in={renderPage} style={{ height: '100%' }}>
-      <Box p={20} overflowY="scroll" h="100%">
-        <Center>
-          <SimpleGrid columns={{ base: 1, md: 2, lg: 3, xl: 4 }} gap={10}>
-            <NFTCards isLoading={isLoading} nfts={data?.ownedNfts} />
-          </SimpleGrid>
-        </Center>
-      </Box>
-    </SlideFade>
+    <ImageGrid>
+      <NFTCards isLoading={isLoading} nfts={data?.ownedNfts} />
+    </ImageGrid>
   );
 };
 

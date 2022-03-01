@@ -1,4 +1,4 @@
-import { Box, SlideFade } from '@chakra-ui/react';
+import { Box, Fade, SlideFade } from '@chakra-ui/react';
 import { Route } from 'wouter';
 
 import About from 'routes/About';
@@ -16,34 +16,36 @@ type PageProps = {
 };
 
 const Page = ({ renderPage }: PageProps) => (
-  <Box bgColor="blackAlpha.900" h="100vh">
+  <Box minHeight="100vh" h="100%">
     <SlideFade in={renderPage} offsetY={0}>
       <Header />
     </SlideFade>
 
-    <Route path="/">
-      <Home renderPage={renderPage} />
-    </Route>
+    <Fade in={renderPage}>
+      <Route path="/">
+        <Home />
+      </Route>
 
-    <Route path="/about">
-      <About renderPage={renderPage} />
-    </Route>
+      <Route path="/about">
+        <About />
+      </Route>
 
-    <Route path="/connect">
-      <Connect renderPage={renderPage} />
-    </Route>
+      <Route path="/connect">
+        <Connect />
+      </Route>
 
-    <Route path="/investing">
-      <Investing renderPage={renderPage} />
-    </Route>
+      <Route path="/investing">
+        <Investing />
+      </Route>
 
-    <Route path="/nfts">
-      <NFTs renderPage={renderPage} />
-    </Route>
+      <Route path="/nfts">
+        <NFTs />
+      </Route>
 
-    <Route path="/photos">
-      <Photos renderPage={renderPage} />
-    </Route>
+      <Route path="/photos">
+        <Photos />
+      </Route>
+    </Fade>
 
     <SlideFade in={renderPage} offsetY={0}>
       <Footer />

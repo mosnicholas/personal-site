@@ -1,4 +1,4 @@
-import { VStack, Image, Skeleton, Text, Box } from '@chakra-ui/react';
+import { VStack, Image, Skeleton, Text } from '@chakra-ui/react';
 
 import { NFT } from 'utils/types';
 
@@ -8,21 +8,28 @@ type NFTCardProps = {
 
 const IMAGE_SIZE = 255;
 
+const getNFTImageUrl = (imageUrl: string) => {
+  if (imageUrl.startsWith('ipfs://')) {
+    return imageUrl.replace('ipfs://', 'https://ipfs.io/ipfs/');
+  }
+
+  return imageUrl;
+};
+
 const NFTLoadingCard = () => (
   <Skeleton w={IMAGE_SIZE} h={IMAGE_SIZE} rounded="sm" />
 );
 
 const NFTCard = ({ nft }: NFTCardProps) => (
-  <VStack alignItems="flex-start" position="relative">
+  <VStack alignItems="flex-start">
     <Image
       fallback={<Skeleton w={IMAGE_SIZE} h={IMAGE_SIZE} rounded="sm" />}
-      src={nft.metadata.image}
+      src={getNFTImageUrl(nft.metadata.image)}
       w={IMAGE_SIZE}
       h={IMAGE_SIZE}
     />
-    <Box position="absolute" bottom={0} bgGradient="">
-      <Text fontSize="sm">{nft.title}</Text>
-    </Box>
+
+    <Text fontSize="sm">{nft.title}</Text>
   </VStack>
 );
 

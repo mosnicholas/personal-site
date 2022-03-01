@@ -2,7 +2,6 @@ import { extendTheme } from '@chakra-ui/react';
 
 const theme = extendTheme({
   fonts: {
-    heading: 'Roboto Mono, sans serif',
     body: 'Roboto, sans serif',
   },
   initialColorMode: 'dark',
@@ -12,6 +11,7 @@ const theme = extendTheme({
       body: {
         color: 'gray.400',
         letterSpacing: '1.2px',
+        backgroundColor: 'blackAlpha.900',
       },
       space: {
         px: '4px',

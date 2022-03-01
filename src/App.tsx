@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { Center, ScaleFade, useDisclosure } from '@chakra-ui/react';
 import { KBarProvider } from 'kbar';
+import { useLocation, useRoute } from 'wouter';
 
 import KBarSearchBar from 'components/KBarSearch';
 import useKBarActions from 'hooks/useKBarActions';
@@ -10,8 +11,9 @@ import TextScrambler from './components/TextScrambler';
 import Page from './Page';
 
 const App = () => {
-  const [isLoading, setIsLoading] = useState(true);
-  const [renderPage, setRenderPage] = useState(false);
+  const [isHome] = useRoute('/');
+  const [isLoading, setIsLoading] = useState(isHome);
+  const [renderPage, setRenderPage] = useState(!isHome);
   const actions = useKBarActions();
   const { isOpen, onOpen, onClose } = useDisclosure();
 

@@ -1,17 +1,7 @@
 import { Flex, HStack, Link } from '@chakra-ui/react';
 
 const Footer = () => (
-  <Flex
-    as="footer"
-    align="center"
-    justify="center"
-    wrap="wrap"
-    w="100%"
-    py={4}
-    px={8}
-    position="fixed"
-    bottom={0}
-  >
+  <Flex as="footer" align="center" justify="center" wrap="wrap" w="100%" py={4}>
     <HStack spacing={6} fontSize="sm">
       <Link isExternal href="https://twitter.com/__nimo23">
         twitter
