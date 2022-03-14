@@ -7990,6 +7990,11 @@ react-app-polyfill@^3.0.0:
     regenerator-runtime "^0.13.9"
     whatwg-fetch "^3.6.2"
 
+react-calendly@^3.0.1:
+  version "3.0.1"
+  resolved "https://registry.yarnpkg.com/react-calendly/-/react-calendly-3.0.1.tgz#2be805dbd63640304f2b3e5459d9d8fa6e7e0241"
+  integrity sha512-O2tS5wQDshACj1S/QaeORG+Ds/UunubUNw01qIKloyMmrShX6JMUlgl5zP7LBQWC78uCaHjBh1twXRjbmngsZw==
+
 react-clientside-effect@^1.2.5:
   version "1.2.5"
   resolved "https://registry.npmjs.org/react-clientside-effect/-/react-clientside-effect-1.2.5.tgz"
@@ -8057,6 +8062,11 @@ react-focus-lock@2.5.2:
     react-clientside-effect "^1.2.5"
     use-callback-ref "^1.2.5"
     use-sidecar "^1.0.5"
+
+react-icons@^4.3.1:
+  version "4.3.1"
+  resolved "https://registry.yarnpkg.com/react-icons/-/react-icons-4.3.1.tgz#2fa92aebbbc71f43d2db2ed1aed07361124e91ca"
+  integrity sha512-cB10MXLTs3gVuXimblAdI71jrJx8njrJZmNMEMC+sQu5B/BIOmlsAjskdqpn81y8UBVEGuHODd7/ci5DvoSzTQ==
 
 react-is@^16.13.1, react-is@^16.7.0:
   version "16.13.1"

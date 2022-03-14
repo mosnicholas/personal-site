@@ -1,6 +1,12 @@
 import { useContext } from 'react';
 
-import { Box, Modal, ModalContent, ModalOverlay } from '@chakra-ui/react';
+import {
+  Box,
+  Center,
+  Modal,
+  ModalContent,
+  ModalOverlay,
+} from '@chakra-ui/react';
 import {
   KBarAnimator,
   KBarResults,
@@ -29,6 +35,7 @@ const KBarSearchBar = ({ isOpen }: KBarSearchBarProps) => {
         }
       }}
       size="lg"
+      isCentered
     >
       <ModalOverlay />
       <ModalContent>
@@ -36,10 +43,8 @@ const KBarSearchBar = ({ isOpen }: KBarSearchBarProps) => {
           as={KBarAnimator}
           maxW="600px"
           w="100%"
-          bgColor="white"
           rounded="md"
           overflow="hidden"
-          boxShadow="0px 6px 20px var(--chakra-colors-blackAlpha-500)"
         >
           <Box
             as={KBarSearch}
@@ -50,6 +55,7 @@ const KBarSearchBar = ({ isOpen }: KBarSearchBarProps) => {
             boxSizing="border-box"
             px={4}
             py={3}
+            bgColor="transparent"
           />
           <KBarResults
             items={results}

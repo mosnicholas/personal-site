@@ -1,6 +1,6 @@
-import { Box, Fade, SlideFade } from '@chakra-ui/react';
-import { Route } from 'wouter';
+import { Flex, SlideFade } from '@chakra-ui/react';
 
+import RouteWrapper from 'components/Layout/RouteWrapper';
 import About from 'routes/About';
 import Connect from 'routes/Connect';
 import Home from 'routes/Home';
@@ -11,46 +11,40 @@ import Photos from 'routes/Photos';
 import Footer from './components/Footer';
 import Header from './components/Header';
 
-type PageProps = {
-  renderPage: boolean;
-};
-
-const Page = ({ renderPage }: PageProps) => (
-  <Box minHeight="100vh" h="100%">
-    <SlideFade in={renderPage} offsetY={0}>
+const Page = () => (
+  <Flex minHeight="100vh" h="100%" flexDir="column" overflow="hidden">
+    <SlideFade in offsetY={0}>
       <Header />
     </SlideFade>
 
-    <Fade in={renderPage}>
-      <Route path="/">
-        <Home />
-      </Route>
+    <RouteWrapper path="/">
+      <Home />
+    </RouteWrapper>
 
-      <Route path="/about">
-        <About />
-      </Route>
+    <RouteWrapper path="/about">
+      <About />
+    </RouteWrapper>
 
-      <Route path="/connect">
-        <Connect />
-      </Route>
+    <RouteWrapper path="/connect">
+      <Connect />
+    </RouteWrapper>
 
-      <Route path="/investing">
-        <Investing />
-      </Route>
+    <RouteWrapper path="/investing">
+      <Investing />
+    </RouteWrapper>
 
-      <Route path="/nfts">
-        <NFTs />
-      </Route>
+    <RouteWrapper path="/nfts">
+      <NFTs />
+    </RouteWrapper>
 
-      <Route path="/photos">
-        <Photos />
-      </Route>
-    </Fade>
+    <RouteWrapper path="/photos">
+      <Photos />
+    </RouteWrapper>
 
-    <SlideFade in={renderPage} offsetY={0}>
+    <SlideFade in offsetY={0}>
       <Footer />
     </SlideFade>
-  </Box>
+  </Flex>
 );
 
 export default Page;

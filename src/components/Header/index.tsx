@@ -12,10 +12,12 @@ const Header = () => (
     w="100%"
     py={4}
     px={8}
-    position="fixed"
+    position="sticky"
+    bgColor="gray.800"
+    boxShadow="xl"
   >
     <Heading>
-      <Box as={Link} href="/" color="gray.50">
+      <Box as={Link} href="/" color="headerColor">
         n
       </Box>
     </Heading>
@@ -23,7 +25,6 @@ const Header = () => (
       <NavLink href="/about" title="about" />
       <NavLink href="/connect" title="connect" />
       <NavLink href="/investing" title="investing" />
-      <NavLink href="/nfts" title="nfts" />
       <NavLink href="/photos" title="photos" />
     </HStack>
   </Flex>

@@ -1,6 +1,15 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
-import { Link, SlideFade, Text, VStack } from '@chakra-ui/react';
+import {
+  Box,
+  Icon,
+  Kbd,
+  Link,
+  SlideFade,
+  Text,
+  VStack,
+} from '@chakra-ui/react';
+import { FiCommand } from 'react-icons/fi';
 
 const TEXTS = [
   <Text>
@@ -15,23 +24,29 @@ const TEXTS = [
       Susa Ventures
     </Link>
   </Text>,
-  'Massive foodie',
+  'Food lover',
   'Angel investor',
-  'Photographer',
+  'Amateur photographer',
 ];
 
 const TextCycler = () => {
-  const [textIndex, setTextIndex] = useState(0);
+  const [textIndex, setTextIndex] = useState(-1);
   const [showText, setShowText] = useState(false);
+  const [text, setText] = useState<string | React.ReactNode>('');
 
   useEffect(() => {
-    setTimeout(() => {
-      setShowText(false);
+    if (textIndex < TEXTS.length) {
       setTimeout(() => {
-        setShowText(true);
-      }, 250);
-    }, 1250);
-    setTimeout(() => setTextIndex(textIndex + 1), 1500);
+        setShowText(false);
+        setTimeout(() => {
+          setShowText(true);
+        }, 250);
+      }, 1250);
+      setTimeout(() => setTextIndex(textIndex + 1), 1500);
+      setText(TEXTS[textIndex % TEXTS.length]);
+    } else {
+      setText('Hit cmd + k to get going');
+    }
   }, [textIndex]);
 
   return (
@@ -44,7 +59,7 @@ const TextCycler = () => {
       color="gray.400"
     >
       <SlideFade in={showText} offsetY={-10}>
-        {TEXTS[textIndex % TEXTS.length]}
+        {text}
       </SlideFade>
     </VStack>
   );

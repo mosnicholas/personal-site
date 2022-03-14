@@ -1,22 +1,20 @@
-import { Center, Flex, Heading } from '@chakra-ui/react';
+import { GridItem, Heading, Image, SimpleGrid, VStack } from '@chakra-ui/react';
 
+import me from 'assets/me.jpg';
 import TextCycler from 'components/TextCycler';
 
 const Home = () => (
-  <Center h="100%">
-    <Flex
-      py={5}
-      px={{ base: 10, md: 'unset' }}
-      maxW="800px"
-      w="100%"
-      flexDir="column"
-    >
-      <Heading fontFamily="Roboto" color="gray.50">
-        Hey, I&apos;m Nico.
-      </Heading>
-      <TextCycler />
-    </Flex>
-  </Center>
+  <SimpleGrid columns={3}>
+    <GridItem colSpan={2} d="flex" alignSelf="center">
+      <VStack alignItems="flex-start">
+        <Heading fontFamily="Roboto" color="headerColor">
+          Hey, I&apos;m Nico.
+        </Heading>
+        <TextCycler />
+      </VStack>
+    </GridItem>
+    <Image src={me} rounded="full" w={256} />
+  </SimpleGrid>
 );
 
 export default Home;

@@ -11,7 +11,7 @@ import queryClient from 'utils/queryClient';
 
 import App from './App';
 import reportWebVitals from './reportWebVitals';
-import theme from './utils/theme';
+import theme from './theme';
 
 ReactDOM.render(
   <React.StrictMode>

@@ -7,7 +7,7 @@ type ImageGridProps = {
 };
 
 const ImageGrid = ({ children }: ImageGridProps) => (
-  <Box p={20} overflowY="scroll" h="100%">
+  <Box py={20} overflowY="scroll" h="100%">
     <Center>
       <SimpleGrid columns={{ base: 1, md: 2, lg: 3, xl: 4 }} gap={10}>
         {children}

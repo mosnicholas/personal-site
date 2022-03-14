@@ -1,31 +1,46 @@
 import { Box } from '@chakra-ui/react';
-import { Link } from 'wouter';
+import { Link, useRoute } from 'wouter';
 
 type NavLinkProps = {
   title: string;
   href: string;
 };
 
-const NavLink = ({ title, href }: NavLinkProps) => (
-  <Box
-    as={Link}
-    href={href}
-    color="gray.400"
-    fontWeight="light"
-    textTransform="uppercase"
-    fontSize="xs"
-    letterSpacing="1.2px"
-    py={2}
-    px={4}
-    borderRadius={2}
-    transition="all 0.25s ease-in-out"
-    _hover={{
-      bgColor: 'gray.700',
-      color: 'gray.50',
-    }}
-  >
-    {title}
-  </Box>
-);
+const NavLink = ({ title, href }: NavLinkProps) => {
+  const [isActive] = useRoute(href);
+
+  return (
+    <Box
+      as={Link}
+      href={href}
+      color={isActive ? 'whiteAlpha.900' : 'whiteAlpha.500'}
+      fontWeight="light"
+      textTransform="uppercase"
+      fontSize="xs"
+      letterSpacing="1.2px"
+      py={2}
+      px={4}
+      borderRadius={2}
+      position="relative"
+      transition="all 0.25s ease-in-out"
+      _hover={{
+        bgColor: 'gray.700',
+        color: 'gray.50',
+      }}
+      role="group"
+    >
+      <Box
+        position="absolute"
+        bottom={0}
+        bgColor="whiteAlpha.900"
+        px={isActive ? 4 : 0}
+        _groupHover={{ px: 4 }}
+        h="1px"
+        transition="all 0.25s ease-in-out"
+      />
+      {title}
+    </Box>
+  );
+};
 
 export default NavLink;
