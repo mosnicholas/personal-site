@@ -11,17 +11,21 @@ import { VscPerson } from 'react-icons/vsc';
 import { Link as WouterLink } from 'wouter';
 
 const About = () => (
-  <SimpleGrid columns={3}>
-    <GridItem colSpan={1} alignSelf="center">
+  <SimpleGrid columns={{ base: 1, md: 3 }}>
+    <GridItem
+      colSpan={1}
+      alignSelf="center"
+      display={{ base: 'none', md: 'initial' }}
+    >
       <Icon as={VscPerson} boxSize={20} />
     </GridItem>
-    <GridItem colSpan={2} py={20}>
+    <GridItem colSpan={2} py={{ base: 5, md: 20 }}>
       <VStack
         w="100%"
         alignItems="flex-start"
         spacing={5}
         overflowY="scroll"
-        maxH="400px"
+        maxH={{ base: 'unset', md: '400px' }}
       >
         <Text>
           Hello new friend, and welcome to my space! This is a place for me to

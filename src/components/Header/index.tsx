@@ -21,7 +21,7 @@ const Header = () => (
         n
       </Box>
     </Heading>
-    <HStack spacing={0}>
+    <HStack spacing={0} overflowX="scroll">
       <NavLink href="/about" title="about" />
       <NavLink href="/connect" title="connect" />
       <NavLink href="/investing" title="investing" />

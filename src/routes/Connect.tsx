@@ -17,7 +17,7 @@ const Connect = () => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <SimpleGrid columns={3}>
+    <SimpleGrid columns={{ base: 1, md: 3 }}>
       <GridItem colSpan={1} alignSelf="center">
         <Icon as={MdOutlineAlternateEmail} boxSize={20} />
       </GridItem>
