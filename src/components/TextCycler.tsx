@@ -1,15 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-import {
-  Box,
-  Icon,
-  Kbd,
-  Link,
-  SlideFade,
-  Text,
-  VStack,
-} from '@chakra-ui/react';
-import { FiCommand } from 'react-icons/fi';
+import { Link, SlideFade, Text, VStack } from '@chakra-ui/react';
 
 const TEXTS = [
   <Text>

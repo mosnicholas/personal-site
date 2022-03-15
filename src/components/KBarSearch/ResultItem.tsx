@@ -28,6 +28,7 @@ const ResultItem = forwardRef(({ item, active }: ResultItemProps, ref) => {
       alignItems="center"
       spacing={1}
     >
+      {/* eslint-disable-next-line */}
       <Icon as={item.icon as any} boxSize={6} />
       <Text>{item.name}</Text>
     </HStack>

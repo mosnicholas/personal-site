@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { Button, Center, ScaleFade, useDisclosure } from '@chakra-ui/react';
+import { Center, ScaleFade, useDisclosure } from '@chakra-ui/react';
 import { KBarProvider } from 'kbar';
 import { useRoute } from 'wouter';
 

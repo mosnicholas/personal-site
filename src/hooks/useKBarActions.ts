@@ -8,6 +8,7 @@ import { VscPerson } from 'react-icons/vsc';
 import { useLocation } from 'wouter';
 
 const useKBarActions = () => {
+  // eslint-disable-next-line
   const [_, setLocation] = useLocation();
 
   return [

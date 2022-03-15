@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 
-import { Center, Flex, Heading, Fade } from '@chakra-ui/react';
+import { Center, Flex, Fade } from '@chakra-ui/react';
 import { Route, useRoute } from 'wouter';
 
 type RouteWrapperProps = {

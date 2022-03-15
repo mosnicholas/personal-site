@@ -1,12 +1,6 @@
 import { useContext } from 'react';
 
-import {
-  Box,
-  Center,
-  Modal,
-  ModalContent,
-  ModalOverlay,
-} from '@chakra-ui/react';
+import { Box, Modal, ModalContent, ModalOverlay } from '@chakra-ui/react';
 import {
   KBarAnimator,
   KBarResults,
