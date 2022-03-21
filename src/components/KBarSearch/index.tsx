@@ -15,6 +15,7 @@ import ResultItem from './ResultItem';
 type KBarSearchBarProps = {
   isOpen: boolean;
 };
+
 const KBarSearchBar = ({ isOpen }: KBarSearchBarProps) => {
   const { results } = useMatches();
   const kbarContext = useContext(KBarContext);

@@ -23,11 +23,11 @@ const NavLink = ({ title, href }: NavLinkProps) => {
       borderRadius={2}
       position="relative"
       transition="all 0.25s ease-in-out"
+      role="group"
       _hover={{
         bgColor: 'gray.700',
         color: 'gray.50',
       }}
-      role="group"
     >
       <Box
         position="absolute"

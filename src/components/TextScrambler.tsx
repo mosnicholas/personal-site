@@ -36,7 +36,11 @@ const TextScrambler = ({ text, callback }: TextScramblerProps) => {
   }, [scrambledText, text]);
 
   return (
-    <Heading fontFamily="Roboto Mono, sans serif" {...animProps}>
+    <Heading
+      fontFamily="Roboto Mono, sans serif"
+      textAlign="center"
+      {...animProps}
+    >
       {renderedText ?? scrambledText}
     </Heading>
   );
