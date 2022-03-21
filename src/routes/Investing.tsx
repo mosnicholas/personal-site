@@ -1,7 +1,7 @@
 import { Center, Flex, Heading, Text, HStack } from '@chakra-ui/react';
 
 const Investing = () => (
-  <Center h="100%">
+  <Center h="100%" pt={{ base: 20, md: 0 }}>
     <Flex
       py={5}
       px={{ base: 10, md: 'unset' }}

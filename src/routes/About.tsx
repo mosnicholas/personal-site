@@ -11,7 +11,7 @@ import { VscPerson } from 'react-icons/vsc';
 import { Link as WouterLink } from 'wouter';
 
 const About = () => (
-  <SimpleGrid columns={{ base: 1, md: 3 }}>
+  <SimpleGrid columns={{ base: 1, md: 3 }} pt={{ base: 20, md: 0 }}>
     <GridItem
       colSpan={1}
       alignSelf="center"

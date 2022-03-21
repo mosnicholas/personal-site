@@ -18,7 +18,7 @@ const Header = () => {
       w="100%"
       py={4}
       px={8}
-      position="sticky"
+      position={{ base: 'fixed', md: 'sticky' }}
       bgColor="gray.800"
       boxShadow="xl"
     >

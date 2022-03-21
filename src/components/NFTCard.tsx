@@ -21,7 +21,7 @@ const NFTLoadingCard = () => (
 );
 
 const NFTCard = ({ nft }: NFTCardProps) => (
-  <VStack alignItems="flex-start">
+  <VStack alignItems={{ base: 'center', md: 'flex-start' }}>
     <Image
       fallback={<Skeleton w={IMAGE_SIZE} h={IMAGE_SIZE} rounded="sm" />}
       src={getNFTImageUrl(nft.metadata.image)}
