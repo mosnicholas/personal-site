@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-import { Link, SlideFade, Text, VStack } from '@chakra-ui/react';
+import { Flex, Link, SlideFade, Text } from '@chakra-ui/react';
 
 const TEXTS = [
   <Text>
@@ -41,18 +41,11 @@ const TextCycler = () => {
   }, [textIndex]);
 
   return (
-    <VStack
-      spacing={2}
-      w="100%"
-      align="flex-start"
-      mt={4}
-      fontSize="lg"
-      color="gray.400"
-    >
-      <SlideFade in={showText} offsetY={-10}>
+    <SlideFade in={showText} offsetY={-10}>
+      <Flex fontSize="lg" color="gray.400" height={10}>
         {text}
-      </SlideFade>
-    </VStack>
+      </Flex>
+    </SlideFade>
   );
 };
 

@@ -4,7 +4,7 @@ import me from 'assets/me.jpg';
 import TextCycler from 'components/TextCycler';
 
 const Home = () => (
-  <SimpleGrid columns={{ base: 1, md: 3 }} px={10}>
+  <SimpleGrid columns={{ base: 1, md: 3 }} px={10} gap={2}>
     <GridItem colSpan={2} d="flex" alignSelf="center">
       <VStack alignItems="flex-start">
         <Heading fontFamily="Roboto" color="headerColor">
