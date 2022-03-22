@@ -26,7 +26,7 @@ const KBarSearchBar = ({ isOpen }: KBarSearchBarProps) => {
       onClose={() => {
         if (kbarContext.getState().visualState !== 'hidden') {
           kbarContext.options.callbacks?.onClose?.();
-          kbarContext.query.setVisualState(VisualState.animatingOut);
+          kbarContext.query.setVisualState(VisualState.hidden);
         }
       }}
       size="lg"

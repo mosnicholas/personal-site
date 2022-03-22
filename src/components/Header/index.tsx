@@ -1,7 +1,7 @@
 import { useContext } from 'react';
 
 import { Box, Flex, Heading, HStack, Icon, IconButton } from '@chakra-ui/react';
-import { KBarContext } from 'kbar';
+import { KBarContext, VisualState } from 'kbar';
 import { GiHamburgerMenu } from 'react-icons/gi';
 import { Link } from 'wouter';
 
@@ -43,6 +43,7 @@ const Header = () => {
         aria-label="menu"
         variant="ghost"
         onClick={() => {
+          kbarContext.query.setVisualState('hidden' as VisualState);
           kbarContext.options.callbacks?.onOpen?.();
         }}
       />

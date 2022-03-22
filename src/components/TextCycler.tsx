@@ -26,18 +26,24 @@ const TextCycler = () => {
   const [text, setText] = useState<string | React.ReactNode>('');
 
   useEffect(() => {
+    const timeouts: Array<ReturnType<typeof setTimeout>> = [];
     if (textIndex < TEXTS.length) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         setShowText(false);
-        setTimeout(() => {
+        const t1 = setTimeout(() => {
           setShowText(true);
-        }, 250);
+        }, 150);
+        timeouts.push(t1);
       }, 1250);
-      setTimeout(() => setTextIndex(textIndex + 1), 1500);
+      timeouts.push(t);
+      const t3 = setTimeout(() => setTextIndex(textIndex + 1), 1500);
+      timeouts.push(t3);
       setText(TEXTS[textIndex % TEXTS.length]);
     } else {
       setText('Hit cmd + k to get going');
     }
+
+    return () => timeouts.forEach((t) => clearTimeout(t));
   }, [textIndex]);
 
   return (

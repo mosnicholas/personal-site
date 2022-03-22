@@ -1,4 +1,5 @@
 import { Flex, SlideFade } from '@chakra-ui/react';
+import { Route } from 'wouter';
 
 import RouteWrapper from 'components/Layout/RouteWrapper';
 import About from 'routes/About';
@@ -12,7 +13,13 @@ import Footer from './components/Footer';
 import Header from './components/Header';
 
 const Page = () => (
-  <Flex minHeight="100vh" h="100%" flexDir="column" overflow="hidden">
+  <Flex
+    minHeight="100vh"
+    h="100%"
+    flexDir="column"
+    overflow="hidden"
+    position="relative"
+  >
     <SlideFade in offsetY={0}>
       <Header />
     </SlideFade>
@@ -29,9 +36,9 @@ const Page = () => (
       <Connect />
     </RouteWrapper>
 
-    <RouteWrapper path="/investing">
+    <Route path="/investing">
       <Investing />
-    </RouteWrapper>
+    </Route>
 
     <RouteWrapper path="/nfts">
       <NFTs />

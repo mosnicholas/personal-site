@@ -35,7 +35,7 @@ const About = () => (
           I&apos;m a Greek-American software engineer with a love for getting
           people together. Currently residing in NYC.
         </Text>
-        <Heading fontSize="lg">Career</Heading>
+        <Heading fontSize="lg">Career bio</Heading>
         <Text>
           After a few fun internships from Nest to Facebook, I started my career
           at{' '}

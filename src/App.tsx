@@ -31,6 +31,7 @@ const App = () => {
           onClose,
           onSelectAction: onClose,
         },
+        disableDocumentLock: true,
       }}
     >
       <KBarSearchBar isOpen={isOpen} />
