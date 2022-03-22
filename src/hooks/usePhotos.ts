@@ -14,6 +14,7 @@ const usePhotos = () => {
     ).then(async (val) => {
       const jsonBody = await val.json();
       return jsonBody?.graphql?.user?.edge_owner_to_timeline_media?.edges?.map(
+        // eslint-disable-next-line
         ({ node }: { node: Record<string, any> }) => ({
           displayUrl: node?.display_url,
           caption: node?.edge_media_to_caption?.edges?.[0]?.node?.text,
