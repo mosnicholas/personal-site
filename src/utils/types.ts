@@ -11,3 +11,9 @@ export type NFT = {
     image: string;
   };
 };
+
+export type IgPhoto = {
+  displayUrl: string;
+  caption: string;
+  mediaPreview: string;
+};
