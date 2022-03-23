@@ -2,7 +2,6 @@ import * as React from 'react';
 
 import { ChakraProvider } from '@chakra-ui/react';
 import ReactDOM from 'react-dom';
-import TagManager from 'react-gtm-module';
 import { QueryClientProvider } from 'react-query';
 
 import '@fontsource/roboto-mono';
@@ -13,12 +12,6 @@ import queryClient from 'utils/queryClient';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import theme from './theme';
-
-if (process.env.NODE_ENV === 'production') {
-  TagManager.initialize({
-    gtmId: 'G-MMNPQMTSKX',
-  });
-}
 
 ReactDOM.render(
   <React.StrictMode>
