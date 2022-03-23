@@ -25,8 +25,8 @@ const TEXTS = [
 ];
 
 const TextCycler = () => {
-  const [textIndex, setTextIndex] = useState(0);
-  const [showText, setShowText] = useState(true);
+  const [textIndex, setTextIndex] = useState(-1);
+  const [showText, setShowText] = useState(false);
   const [text, setText] = useState<string | React.ReactNode>('');
 
   useEffect(() => {
