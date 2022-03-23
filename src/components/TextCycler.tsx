@@ -2,6 +2,10 @@ import React, { useEffect, useState } from 'react';
 
 import { Flex, Link, SlideFade, Text } from '@chakra-ui/react';
 
+const CYCLE_TIME = 1500;
+const FADE_OUT_TIME = 250;
+const SHOW_TEXT = CYCLE_TIME - FADE_OUT_TIME;
+
 const TEXTS = [
   <Text>
     Software Engineer @{' '}
@@ -21,29 +25,23 @@ const TEXTS = [
 ];
 
 const TextCycler = () => {
-  const [textIndex, setTextIndex] = useState(-1);
-  const [showText, setShowText] = useState(false);
+  const [textIndex, setTextIndex] = useState(0);
+  const [showText, setShowText] = useState(true);
   const [text, setText] = useState<string | React.ReactNode>('');
 
   useEffect(() => {
-    const timeouts: Array<ReturnType<typeof setTimeout>> = [];
     if (textIndex < TEXTS.length) {
-      const t = setTimeout(() => {
+      setTimeout(() => {
         setShowText(false);
-        const t1 = setTimeout(() => {
+        setTimeout(() => {
           setShowText(true);
-        }, 150);
-        timeouts.push(t1);
-      }, 1250);
-      timeouts.push(t);
-      const t3 = setTimeout(() => setTextIndex(textIndex + 1), 1500);
-      timeouts.push(t3);
+        }, FADE_OUT_TIME);
+      }, SHOW_TEXT);
+      setTimeout(() => setTextIndex(textIndex + 1), CYCLE_TIME);
       setText(TEXTS[textIndex % TEXTS.length]);
     } else {
       setText('Hit cmd + k to get going');
     }
-
-    return () => timeouts.forEach((t) => clearTimeout(t));
   }, [textIndex]);
 
   return (
