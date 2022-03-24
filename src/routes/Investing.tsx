@@ -133,17 +133,31 @@ const Investing = () => {
 
             <InvestingSection heading="Food & Hospitality" id="food">
               <Text>
-                I started my career at AirBnb, and care deeply about the
-                inherent power of travel and food to bring people together.
-                Eating healthy and experiencing the world has had a fundamental
-                impact on who I am and what I consider to be right.
+                I started my career at AirBnb, worked at Noma, and care deeply
+                about the inherent power of travel and food to bring people
+                together. Eating healthy and experiencing the world has had a
+                fundamental impact on who I am and what I consider to be right.
+              </Text>
+              <Text>
+                For some food/restaurant tech investments, I am also working
+                with the folks at{' '}
+                <Link href="https://kitchenfund.com" isExternal>
+                  Kitchen Fund
+                </Link>{' '}
+                to start thinking through their venture investing thesis and how
+                it works with their current growth equity investments in
+                restaurant groups.
               </Text>
               <Text>
                 Sample investments:{' '}
                 <Link href="https://www.jupiter.co" isExternal>
                   Juniper
                 </Link>{' '}
-                (food x creator economy).
+                (food x creator economy),{' '}
+                <Link href="https://akua.co" isExternal>
+                  Akua
+                </Link>
+                .
               </Text>
             </InvestingSection>
           </Fade>
