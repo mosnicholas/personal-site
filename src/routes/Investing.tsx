@@ -173,7 +173,7 @@ const Investing = () => {
         alignItems="center"
         right={10}
         height="100%"
-        display={{ base: 'none', md: 'initial' }}
+        display={{ base: 'none', md: 'flex' }}
       >
         <UnorderedList styleType="none">
           <ListItem py={4}>
