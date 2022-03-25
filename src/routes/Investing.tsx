@@ -151,7 +151,7 @@ const Investing = () => {
               <Text>
                 Sample investments:{' '}
                 <Link href="https://www.jupiter.co" isExternal>
-                  Juniper
+                  Jupiter
                 </Link>{' '}
                 (food x creator economy),{' '}
                 <Link href="https://akua.co" isExternal>
