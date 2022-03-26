@@ -20,7 +20,7 @@ const NFTs = () => {
   }
 
   return (
-    <Box pb="255px">
+    <Box pb="255px" pt="200px" d="flex" flexDir="column">
       <ParallaxProvider>
         {data?.ownedNfts?.map((nft) => (
           <NFTCard

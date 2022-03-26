@@ -35,7 +35,8 @@ const translateX = () => 50 + Math.random() * 180;
 const NFTCard = ({ nft }: NFTCardProps) => (
   <Parallax
     translateX={[`${translateX()}px`, '0px']}
-    scale={[0.75, 1]}
+    scale={[0.65, 1]}
+    opacity={[0.4, 1]}
     rotate={[-rotateDeg(), rotateDeg()]}
     easing="easeInQuad"
   >
