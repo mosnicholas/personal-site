@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 
 import '@fontsource/roboto-mono';
 import '@fontsource/roboto';
+import '@fontsource/share-tech-mono';
 import './index.css';
 
 import App from './App';

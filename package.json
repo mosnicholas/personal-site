@@ -7,7 +7,8 @@
     "yarn": ">=1.22.0"
   },
   "scripts": {
-    "start": "react-scripts start",
+    "start": "vercel dev",
+    "start:react": "react-scripts start",
     "build": "react-scripts build",
     "eject": "react-scripts eject"
   },
@@ -24,8 +25,10 @@
     ]
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
     "@fontsource/roboto": "^4.5.3",
     "@fontsource/roboto-mono": "^4.5.3",
+    "@fontsource/share-tech-mono": "^5.2.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-scripts": "5.0.0",
@@ -37,6 +40,7 @@
     "@types/react-dom": "^19.2.2",
     "@typescript-eslint/eslint-plugin": "^5.12.0",
     "@typescript-eslint/parser": "^5.12.0",
+    "@vercel/node": "^5.5.4",
     "eslint": "^8.9.0",
     "eslint-config-airbnb": "^19.0.4",
     "eslint-config-prettier": "^8.4.0",
@@ -45,6 +49,7 @@
     "eslint-plugin-prettier": "^4.0.0",
     "eslint-plugin-react": "^7.28.0",
     "prettier": "^2.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vercel": "^48.8.2"
   }
 }

@@ -80,6 +80,43 @@ code {
   color: #d1d5db;
 }
 
+.terminal-hint {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-family: 'Roboto Mono', monospace;
+  animation: fadeInHint 1s ease-in forwards;
+  opacity: 0;
+  letter-spacing: 0.5px;
+  z-index: 100;
+}
+
+.key-hint {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  background-color: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  color: #9ca3af;
+  font-weight: 600;
+  margin: 0 0.25rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes fadeInHint {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 @keyframes glitch {
   2%, 64% {
     transform: translate(2px, 0) skew(0deg);
@@ -114,4 +151,215 @@ code {
   62% {
     transform: translate(-22px, 5px) skew(21deg);
   }
+}
+
+/* Terminal Mode Styles */
+.terminal-mode {
+  width: 100vw;
+  height: 100vh;
+  background-color: #000;
+  color: #00ff00;
+  font-family: 'Share Tech Mono', monospace;
+  padding: 2rem;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.terminal-content {
+  max-width: 900px;
+  width: 100%;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  border: 3px solid #00ff00;
+  border-radius: 8px;
+  box-shadow:
+    0 0 5px rgba(0, 255, 0, 0.2),
+    0 0 10px rgba(0, 255, 0, 0.1);
+  position: relative;
+  padding: 3rem 2rem 2rem;
+  background-color: rgba(0, 0, 0, 0.9);
+  outline: none;
+}
+
+.terminal-content::before {
+  content: 'NIMO TERMINAL v1.0.0';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(180deg, rgba(0, 255, 0, 0.2) 0%, rgba(0, 255, 0, 0.05) 100%);
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  letter-spacing: 2px;
+  border-bottom: 1px solid #00ff00;
+}
+
+.boot-sequence {
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.boot-line {
+  margin-bottom: 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.boot-history {
+  font-size: 1rem;
+  line-height: 1.8;
+  margin-bottom: 2rem;
+}
+
+.subtitle-line {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.terminal-link {
+  color: #00ff00;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  transition: all 0.2s ease;
+}
+
+.terminal-link:hover {
+  color: #00ff00;
+  text-decoration-style: solid;
+  text-shadow: 0 0 5px rgba(0, 255, 0, 0.4);
+}
+
+.cursor-blink {
+  display: inline-block;
+  animation: blink 1s step-end infinite;
+  color: #00ff00;
+}
+
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+/* Chat Interface Styles */
+.chat-interface {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 1rem;
+  overflow: hidden;
+  outline: none;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 1rem;
+  scrollbar-width: thin;
+  scrollbar-color: #00ff00 #000;
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-messages::-webkit-scrollbar-track {
+  background: #000;
+}
+
+.chat-messages::-webkit-scrollbar-thumb {
+  background: #00ff00;
+  border-radius: 4px;
+}
+
+.chat-message {
+  margin-bottom: 0.5rem;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+.message-prefix {
+  color: #00ff00;
+  font-weight: bold;
+  margin-right: 0.5rem;
+}
+
+.message-content {
+  color: #00ff00;
+}
+
+.typing-indicator {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.chat-input-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid #00ff00;
+  padding-top: 1rem;
+}
+
+.input-prefix {
+  color: #00ff00;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-measure {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 1rem;
+  pointer-events: none;
+}
+
+.chat-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #00ff00;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 1rem;
+  padding: 0;
+  caret-color: transparent;
+  position: relative;
+  z-index: 1;
+}
+
+.chat-input::selection {
+  background: #00ff00;
+  color: #000;
+}
+
+.input-wrapper .cursor-blink {
+  position: absolute;
+  left: 0;
+  pointer-events: none;
+  z-index: 0;
 }
