@@ -1,4 +1,5 @@
-const Anthropic = require('@anthropic-ai/sdk');
+import Anthropic from '@anthropic-ai/sdk';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // System prompt with info about Nicholas/nimo
 const SYSTEM_PROMPT = `You are a terminal assistant for Nicholas Moschopoulos (also known as "nimo").
@@ -14,9 +15,25 @@ About Nicholas/nimo:
 
 Keep responses SHORT (1-3 sentences max). Be direct and terminal-like. If asked about things unrelated to Nicholas/nimo, politely redirect or say you only answer questions about nimo.`;
 
-module.exports = async (req, res) => {
+interface ChatRequestBody {
+  message: string;
+}
+
+interface ChatResponse {
+  response: string;
+}
+
+interface ErrorResponse {
+  error: string;
+  details?: string;
+}
+
+export default async (
+  req: VercelRequest,
+  res: VercelResponse<ChatResponse | ErrorResponse>
+) => {
   // Enable CORS
-  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader(
@@ -36,7 +53,7 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { message } = req.body;
+    const { message } = req.body as ChatRequestBody;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -45,7 +62,7 @@ module.exports = async (req, res) => {
     // Check for API key
     if (!process.env.ANTHROPIC_API_KEY) {
       return res.status(500).json({
-        error: 'API key not configured. Set ANTHROPIC_API_KEY in Vercel environment variables.'
+        error: 'API key not configured. Set ANTHROPIC_API_KEY in Vercel environment variables.',
       });
     }
 
@@ -68,14 +85,19 @@ module.exports = async (req, res) => {
     });
 
     // Extract the text response
-    const assistantMessage = response.content[0].text;
+    const firstContent = response.content[0];
+    if (firstContent.type !== 'text') {
+      throw new Error('Unexpected response type from Anthropic API');
+    }
 
-    res.status(200).json({ response: assistantMessage });
+    const assistantMessage = firstContent.text;
+
+    return res.status(200).json({ response: assistantMessage });
   } catch (error) {
     console.error('Error calling Anthropic API:', error);
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Failed to process chat message',
-      details: error.message
+      details: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 };

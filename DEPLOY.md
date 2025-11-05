@@ -36,35 +36,27 @@ The chat should work immediately!
 ## How It Works
 
 - **Frontend**: React app served as static files
-- **Backend**: `/api/chat.js` runs as a Vercel Serverless Function
+- **Backend**: `/api/chat.ts` runs as a Vercel Serverless Function
 - **API Key**: Stored securely in Vercel environment variables
 - **Requests**: Frontend calls `/api/chat` → Vercel routes to serverless function
 
 ## Local Development
 
-### Option 1: Use Vercel Dev Server (Recommended)
+### Use Vercel Dev Server
 ```bash
-# Install Vercel CLI globally
+# Install Vercel CLI globally (if you haven't already)
 npm i -g vercel
 
 # Run local dev server with serverless functions
 vercel dev
 ```
 
-This runs the React app AND the serverless function locally.
+This runs the React app AND the serverless function locally, exactly like production.
 
-### Option 2: Run Separate Servers
-```bash
-# Terminal 1 - Backend
-cd server
-yarn install
-cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
-yarn start
-
-# Terminal 2 - Frontend
-yarn start
-```
+**Environment Variables for Local Dev:**
+- Create a `.env` file in the root directory
+- Add: `ANTHROPIC_API_KEY=your_key_here`
+- Vercel Dev will automatically load it
 
 Visit: `http://localhost:3000?mode=terminal`
 
@@ -73,12 +65,10 @@ Visit: `http://localhost:3000?mode=terminal`
 ```
 personal-site/
 ├── api/
-│   └── chat.js              # Vercel Serverless Function
-├── server/
-│   └── index.js             # Express server (local dev fallback)
+│   └── chat.ts              # Vercel Serverless Function (TypeScript)
 ├── src/                     # React app
 ├── vercel.json              # Vercel configuration
-└── package.json             # Root dependencies
+└── package.json             # Dependencies
 ```
 
 ## Environment Variables
@@ -87,8 +77,8 @@ personal-site/
 Set in Vercel dashboard:
 - `ANTHROPIC_API_KEY`
 
-### For Local Development (Express server)
-Create `server/.env`:
+### For Local Development (Vercel Dev)
+Create `.env` in project root:
 ```
 ANTHROPIC_API_KEY=your_key_here
 ```
@@ -96,16 +86,17 @@ ANTHROPIC_API_KEY=your_key_here
 ## Troubleshooting
 
 ### Chat shows "ERROR: Backend not running"
-- **On Vercel**: Check environment variables are set
-- **Locally with Vercel Dev**: Run `vercel dev` not `yarn start`
-- **Locally with Express**: Make sure `yarn server` is running
+- **On Vercel**: Check environment variables are set in Vercel dashboard
+- **Locally**: Make sure you're running `vercel dev`, not `yarn start`
+- **Locally**: Verify `.env` file exists in root with `ANTHROPIC_API_KEY`
 
 ### API Key errors
 - Verify the key is set in Vercel environment variables
+- For local dev, check `.env` file in project root
 - Redeploy after adding/changing environment variables
 
 ### Serverless function not found
-- Check `api/chat.js` exists
+- Check `api/chat.ts` exists
 - Verify `vercel.json` is present
 - Redeploy the project
 
@@ -118,8 +109,8 @@ ANTHROPIC_API_KEY=your_key_here
 ## Further Customization
 
 ### Change the AI Model
-Edit `api/chat.js`, line:
-```javascript
+Edit `api/chat.ts`, line:
+```typescript
 model: 'claude-3-5-haiku-20241022',
 ```
 
@@ -129,10 +120,10 @@ Available models:
 - `claude-3-opus-20240229` (most powerful)
 
 ### Adjust Response Length
-Edit `api/chat.js`, line:
-```javascript
+Edit `api/chat.ts`, line:
+```typescript
 max_tokens: 200,
 ```
 
 ### Customize System Prompt
-Edit the `SYSTEM_PROMPT` constant in `api/chat.js`.
+Edit the `SYSTEM_PROMPT` constant in `api/chat.ts`.

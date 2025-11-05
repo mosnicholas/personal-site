@@ -52,8 +52,7 @@ See [DEPLOY.md](./DEPLOY.md) for full deployment instructions to Vercel.
 ## Project Structure
 
 - `/src` - React frontend code
-- `/api` - Vercel serverless functions
-- `/server` - Local Express server (optional, for local dev)
+- `/api` - Vercel serverless functions (TypeScript)
 - `CLAUDE.md` - Detailed project documentation
 - `DEPLOY.md` - Deployment guide
 
