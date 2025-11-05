@@ -42,16 +42,20 @@ The chat should work immediately!
 
 ## Local Development
 
-### Use Vercel Dev Server
 ```bash
-# Install Vercel CLI globally (if you haven't already)
-npm i -g vercel
+# Install dependencies
+yarn install
 
-# Run local dev server with serverless functions
-vercel dev
+# Create .env file with your API key
+echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
+
+# Run development server
+yarn start
 ```
 
 This runs the React app AND the serverless function locally, exactly like production.
+
+**Note**: `yarn start` now runs `vercel dev` automatically. You don't need to install the Vercel CLI globally - it's already in the project dependencies.
 
 **Environment Variables for Local Dev:**
 - Create a `.env` file in the root directory

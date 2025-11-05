@@ -32,12 +32,20 @@ Visit `?mode=terminal` to unlock:
 # Install dependencies
 yarn install
 
-# Run development server
+# Create .env file with your Anthropic API key
+echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
+
+# Run development server (includes serverless functions)
 yarn start
+
+# Visit the main site
+open http://localhost:3000
 
 # Visit the terminal mode
 open http://localhost:3000?mode=terminal
 ```
+
+**Note**: `yarn start` now runs `vercel dev` which includes both the React app and the API functions. If you just want the React dev server without the API, use `yarn start:react`.
 
 ## Deployment
 
