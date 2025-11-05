@@ -1,53 +1,33 @@
 import { useState } from 'react';
 
-import { Center, ScaleFade, useDisclosure } from '@chakra-ui/react';
-import { KBarProvider } from 'kbar';
-import { useRoute } from 'wouter';
-
-import KBarSearchBar from 'components/KBarSearch';
-import useKBarActions from 'hooks/useKBarActions';
+import { Center, ScaleFade, Text, VStack } from '@chakra-ui/react';
 
 import TextScrambler from './components/TextScrambler';
-import Page from './Page';
 
 const App = () => {
-  const actions = useKBarActions();
-  const [isHome] = useRoute('/');
+  const [isLoading, setIsLoading] = useState(true);
+  const [showSubtitle, setShowSubtitle] = useState(false);
 
-  /**
-   * We use two different keys here to create the fade out effect before
-   * rendering the routes
-   */
-  const [isLoading, setIsLoading] = useState(isHome);
-  const [renderRoutes, setRenderRoutes] = useState(!isHome);
-  const { isOpen, onOpen, onClose } = useDisclosure();
-
-  return renderRoutes ? (
-    <KBarProvider
-      actions={actions}
-      options={{
-        callbacks: {
-          onOpen,
-          onClose,
-          onSelectAction: onClose,
-        },
-        disableDocumentLock: true,
-      }}
-    >
-      <KBarSearchBar isOpen={isOpen} />
-      <Page />
-    </KBarProvider>
-  ) : (
+  return (
     <Center h="100vh">
-      <ScaleFade initialScale={isLoading ? 1 : 0} reverse in={isLoading}>
-        <TextScrambler
-          text="nicholas moschopoulos"
-          callback={() => {
-            setIsLoading(false);
-            setTimeout(() => setRenderRoutes(true), 500);
-          }}
-        />
-      </ScaleFade>
+      <VStack spacing={4}>
+        <ScaleFade initialScale={isLoading ? 1 : 0} reverse in={isLoading}>
+          <TextScrambler
+            text="nicholas moschopoulos"
+            callback={() => {
+              setIsLoading(false);
+              setTimeout(() => setShowSubtitle(true), 500);
+            }}
+          />
+        </ScaleFade>
+        {showSubtitle && (
+          <ScaleFade initialScale={0.9} in={showSubtitle}>
+            <Text fontSize="sm" color="gray.500" textAlign="center">
+              adventurer, cook, and founder of myjunior.ai
+            </Text>
+          </ScaleFade>
+        )}
+      </VStack>
     </Center>
   );
 };

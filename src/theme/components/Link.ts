@@ -1,6 +1,6 @@
 export default {
   variants: {
-    primary: ({ colorScheme = 'messenger' }) => ({
+    primary: ({ colorScheme = 'gray' }) => ({
       color: `${colorScheme}.500`,
       _dark: {
         color: `${colorScheme}.300`,
