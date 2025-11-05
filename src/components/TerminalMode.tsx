@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
-import ChatInterface from './ChatInterface';
+import ChatInterface, { ChatInterfaceHandle } from './ChatInterface';
 
 type BootStep = 'initializing' | 'loading' | 'profile' | 'running' | 'chat';
 
@@ -14,6 +14,7 @@ const TerminalMode = () => {
   const [bootStep, setBootStep] = useState<BootStep>('initializing');
   const [lines, setLines] = useState<string[]>([]);
   const [showSubtitle, setShowSubtitle] = useState(false);
+  const chatInterfaceRef = useRef<ChatInterfaceHandle>(null);
 
   useEffect(() => {
     const sequence = async () => {
@@ -44,6 +45,30 @@ const TerminalMode = () => {
     sequence();
   }, []);
 
+  useEffect(() => {
+    // Listen for keydown events anywhere in the terminal
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only focus if we're in chat mode and it's a printable character
+      if (bootStep === 'chat' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Focus the input for any printable key
+        if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete') {
+          chatInterfaceRef.current?.focusInput();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [bootStep]);
+
+  const handleTerminalClick = () => {
+    if (bootStep === 'chat') {
+      chatInterfaceRef.current?.focusInput();
+    }
+  };
+
   const renderSubtitle = () => (
     <div className="boot-line subtitle-line">
       adventurer, cook, and founder of{' '}
@@ -60,7 +85,17 @@ const TerminalMode = () => {
 
   return (
     <div className="terminal-mode">
-      <div className="terminal-content">
+      <div
+        className="terminal-content"
+        onClick={handleTerminalClick}
+        role="button"
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            handleTerminalClick();
+          }
+        }}
+      >
         {bootStep !== 'chat' ? (
           <div className="boot-sequence">
             {lines.map((line, index) => (
@@ -83,7 +118,7 @@ const TerminalMode = () => {
                 </div>
               ))}
             </div>
-            <ChatInterface />
+            <ChatInterface ref={chatInterfaceRef} />
           </>
         )}
       </div>

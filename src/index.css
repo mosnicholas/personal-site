@@ -144,6 +144,8 @@ code {
   position: relative;
   padding: 3rem 2rem 2rem;
   background-color: rgba(0, 0, 0, 0.9);
+  cursor: text;
+  outline: none;
 }
 
 .terminal-content::before {
@@ -217,6 +219,8 @@ code {
   flex: 1;
   gap: 1rem;
   overflow: hidden;
+  cursor: text;
+  outline: none;
 }
 
 .chat-messages {
@@ -280,6 +284,23 @@ code {
 .input-prefix {
   color: #00ff00;
   font-weight: bold;
+  flex-shrink: 0;
+}
+
+.input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-measure {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 1rem;
+  pointer-events: none;
 }
 
 .chat-input {
@@ -288,13 +309,22 @@ code {
   border: none;
   outline: none;
   color: #00ff00;
-  font-family: 'Roboto Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 1rem;
   padding: 0;
   caret-color: transparent;
+  position: relative;
+  z-index: 1;
 }
 
 .chat-input::selection {
   background: #00ff00;
   color: #000;
+}
+
+.input-wrapper .cursor-blink {
+  position: absolute;
+  left: 0;
+  pointer-events: none;
+  z-index: 0;
 }
