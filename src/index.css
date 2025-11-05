@@ -80,6 +80,43 @@ code {
   color: #d1d5db;
 }
 
+.terminal-hint {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-family: 'Roboto Mono', monospace;
+  animation: fadeInHint 1s ease-in forwards;
+  opacity: 0;
+  letter-spacing: 0.5px;
+  z-index: 100;
+}
+
+.key-hint {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  background-color: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 4px;
+  color: #9ca3af;
+  font-weight: 600;
+  margin: 0 0.25rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes fadeInHint {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 @keyframes glitch {
   2%, 64% {
     transform: translate(2px, 0) skew(0deg);
