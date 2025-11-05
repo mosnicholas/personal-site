@@ -139,13 +139,11 @@ code {
   border: 3px solid #00ff00;
   border-radius: 8px;
   box-shadow:
-    0 0 10px rgba(0, 255, 0, 0.3),
-    0 0 20px rgba(0, 255, 0, 0.2),
-    0 0 30px rgba(0, 255, 0, 0.1),
-    inset 0 0 60px rgba(0, 255, 0, 0.05);
+    0 0 5px rgba(0, 255, 0, 0.2),
+    0 0 10px rgba(0, 255, 0, 0.1);
   position: relative;
   padding: 3rem 2rem 2rem;
-  background-color: rgba(0, 0, 0, 0.8);
+  background-color: rgba(0, 0, 0, 0.9);
 }
 
 .terminal-content::before {
@@ -194,7 +192,7 @@ code {
 .terminal-link:hover {
   color: #00ff00;
   text-decoration-style: solid;
-  text-shadow: 0 0 8px rgba(0, 255, 0, 0.6);
+  text-shadow: 0 0 5px rgba(0, 255, 0, 0.4);
 }
 
 .cursor-blink {

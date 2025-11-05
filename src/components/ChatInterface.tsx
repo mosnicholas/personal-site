@@ -53,7 +53,11 @@ const ChatInterface = () => {
       console.error('Chat error:', error);
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: 'ERROR: Connection failed. Try again.' },
+        {
+          role: 'assistant',
+          content:
+            'ERROR: Backend not running. Start server: cd server && yarn start',
+        },
       ]);
     } finally {
       setIsLoading(false);

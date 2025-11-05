@@ -65,11 +65,11 @@ const TerminalMode = () => {
           <div className="boot-sequence">
             {lines.map((line, index) => (
               // eslint-disable-next-line react/no-array-index-key
-              <div key={index} className="boot-line">
-                {line}
+              <div key={index}>
+                <div className="boot-line">{line}</div>
+                {index === 1 && showSubtitle && renderSubtitle()}
               </div>
             ))}
-            {showSubtitle && renderSubtitle()}
             <div className="cursor-blink">_</div>
           </div>
         ) : (
@@ -77,11 +77,11 @@ const TerminalMode = () => {
             <div className="boot-history">
               {lines.map((line, index) => (
                 // eslint-disable-next-line react/no-array-index-key
-                <div key={index} className="boot-line">
-                  {line}
+                <div key={index}>
+                  <div className="boot-line">{line}</div>
+                  {index === 1 && renderSubtitle()}
                 </div>
               ))}
-              {renderSubtitle()}
             </div>
             <ChatInterface />
           </>
