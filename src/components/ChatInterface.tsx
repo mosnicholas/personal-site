@@ -1,0 +1,101 @@
+import React, { useState, useRef, useEffect } from 'react';
+
+type Message = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+const ChatInterface = () => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Auto-focus the input
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    // Scroll to bottom when new messages arrive
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+
+    const userMessage = input.trim();
+    setInput('');
+    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: userMessage }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response');
+      }
+
+      const data = await response.json();
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: data.response },
+      ]);
+    } catch (error) {
+      console.error('Chat error:', error);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'ERROR: Connection failed. Try again.' },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="chat-interface">
+      <div className="chat-messages">
+        {messages.map((msg, index) => (
+          // eslint-disable-next-line react/no-array-index-key
+          <div key={index} className="chat-message">
+            <span className="message-prefix">
+              {msg.role === 'user' ? '> ' : '< '}
+            </span>
+            <span className="message-content">{msg.content}</span>
+          </div>
+        ))}
+        {isLoading && (
+          <div className="chat-message">
+            <span className="message-prefix">{'< '}</span>
+            <span className="message-content typing-indicator">...</span>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+      <form onSubmit={handleSubmit} className="chat-input-form">
+        <span className="input-prefix">&gt; </span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          className="chat-input"
+          disabled={isLoading}
+          autoComplete="off"
+          spellCheck="false"
+        />
+        <span className="cursor-blink">_</span>
+      </form>
+    </div>
+  );
+};
+
+export default ChatInterface;

@@ -1,12 +1,28 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 import StreamingText from './components/StreamingText';
+import TerminalMode from './components/TerminalMode';
 import TextScrambler from './components/TextScrambler';
 
 const App = () => {
   const [showNimo, setShowNimo] = useState(false);
   const [streamingComplete, setStreamingComplete] = useState(false);
+  const [isTerminalMode, setIsTerminalMode] = useState(false);
 
+  useEffect(() => {
+    // Check for mode=terminal query parameter
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'terminal') {
+      setIsTerminalMode(true);
+    }
+  }, []);
+
+  // Render terminal mode if query parameter is present
+  if (isTerminalMode) {
+    return <TerminalMode />;
+  }
+
+  // Original site rendering
   return (
     <div className="app">
       <div className="content">
