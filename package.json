@@ -29,6 +29,7 @@
   "dependencies": {
     "@fontsource/roboto": "^4.5.3",
     "@fontsource/roboto-mono": "^4.5.3",
+    "@fontsource/share-tech-mono": "^5.2.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-scripts": "5.0.0",

@@ -13,6 +13,7 @@ function sleep(ms: number) {
 const TerminalMode = () => {
   const [bootStep, setBootStep] = useState<BootStep>('initializing');
   const [lines, setLines] = useState<string[]>([]);
+  const [showSubtitle, setShowSubtitle] = useState(false);
 
   useEffect(() => {
     const sequence = async () => {
@@ -28,10 +29,7 @@ const TerminalMode = () => {
 
       // Step 3: Show profile info
       setBootStep('profile');
-      setLines((prev) => [
-        ...prev,
-        '> adventurer, cook, and founder of Junior',
-      ]);
+      setShowSubtitle(true);
       await sleep(1200);
 
       // Step 4: RUNNING NIMO_CHAT.EXE...
@@ -46,6 +44,20 @@ const TerminalMode = () => {
     sequence();
   }, []);
 
+  const renderSubtitle = () => (
+    <div className="boot-line subtitle-line">
+      adventurer, cook, and founder of{' '}
+      <a
+        href="https://myjunior.ai"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="terminal-link"
+      >
+        Junior
+      </a>
+    </div>
+  );
+
   return (
     <div className="terminal-mode">
       <div className="terminal-content">
@@ -57,6 +69,7 @@ const TerminalMode = () => {
                 {line}
               </div>
             ))}
+            {showSubtitle && renderSubtitle()}
             <div className="cursor-blink">_</div>
           </div>
         ) : (
@@ -68,6 +81,7 @@ const TerminalMode = () => {
                   {line}
                 </div>
               ))}
+              {renderSubtitle()}
             </div>
             <ChatInterface />
           </>
