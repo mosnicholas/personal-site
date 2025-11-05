@@ -1,0 +1,10 @@
+{
+  "buildCommand": "yarn build",
+  "outputDirectory": "build",
+  "devCommand": "yarn start",
+  "installCommand": "yarn install",
+  "framework": "create-react-app",
+  "env": {
+    "ANTHROPIC_API_KEY": "@anthropic_api_key"
+  }
+}
