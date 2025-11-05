@@ -37,11 +37,6 @@ const ChatInterface = forwardRef<ChatInterfaceHandle>((props, ref) => {
   }, []);
 
   useEffect(() => {
-    // Refocus input after messages change (especially after assistant responds)
-    inputRef.current?.focus();
-  }, [messages]);
-
-  useEffect(() => {
     // Scroll to bottom when new messages arrive
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -94,22 +89,8 @@ const ChatInterface = forwardRef<ChatInterfaceHandle>((props, ref) => {
     }
   };
 
-  const handleClick = () => {
-    inputRef.current?.focus();
-  };
-
   return (
-    <div
-      className="chat-interface"
-      onClick={handleClick}
-      role="button"
-      tabIndex={-1}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          handleClick();
-        }
-      }}
-    >
+    <div className="chat-interface">
       <div className="chat-messages">
         {messages.map((msg, index) => (
           // eslint-disable-next-line react/no-array-index-key

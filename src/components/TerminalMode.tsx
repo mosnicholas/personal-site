@@ -63,12 +63,6 @@ const TerminalMode = () => {
     };
   }, [bootStep]);
 
-  const handleTerminalClick = () => {
-    if (bootStep === 'chat') {
-      chatInterfaceRef.current?.focusInput();
-    }
-  };
-
   const renderSubtitle = () => (
     <div className="boot-line subtitle-line">
       adventurer, cook, and founder of{' '}
@@ -85,17 +79,7 @@ const TerminalMode = () => {
 
   return (
     <div className="terminal-mode">
-      <div
-        className="terminal-content"
-        onClick={handleTerminalClick}
-        role="button"
-        tabIndex={-1}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            handleTerminalClick();
-          }
-        }}
-      >
+      <div className="terminal-content">
         {bootStep !== 'chat' ? (
           <div className="boot-sequence">
             {lines.map((line, index) => (
