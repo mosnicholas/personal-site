@@ -1,37 +1,47 @@
 import { useState } from 'react';
 
-import { Center, Link, ScaleFade, Text, VStack } from '@chakra-ui/react';
-
 import TextScrambler from './components/TextScrambler';
 
 const App = () => {
-  const [isLoading, setIsLoading] = useState(true);
+  const [showNimo, setShowNimo] = useState(false);
   const [showSubtitle, setShowSubtitle] = useState(false);
 
   return (
-    <Center h="100vh">
-      <VStack spacing={4}>
-        <ScaleFade initialScale={isLoading ? 1 : 0} reverse in={isLoading}>
+    <div className="app">
+      <div className="content">
+        {!showNimo ? (
           <TextScrambler
-            text="nimo"
+            text="nicholas moschopoulos"
             callback={() => {
-              setIsLoading(false);
-              setTimeout(() => setShowSubtitle(true), 500);
+              setTimeout(() => setShowNimo(true), 500);
             }}
           />
-        </ScaleFade>
-        {showSubtitle && (
-          <ScaleFade initialScale={0.9} in={showSubtitle}>
-            <Text fontSize="sm" color="gray.400" textAlign="center">
-              adventurer, cook, and founder of{' '}
-              <Link href="https://myjunior.ai" isExternal>
-                Junior
-              </Link>
-            </Text>
-          </ScaleFade>
+        ) : (
+          <>
+            <h1 className="scrambler">nimo</h1>
+            {!showSubtitle && (
+              <TextScrambler
+                text="adventurer, cook, and founder of Junior"
+                callback={() => setShowSubtitle(true)}
+                className="subtitle"
+              />
+            )}
+            {showSubtitle && (
+              <div className="subtitle visible">
+                adventurer, cook, and founder of{' '}
+                <a
+                  href="https://myjunior.ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Junior
+                </a>
+              </div>
+            )}
+          </>
         )}
-      </VStack>
-    </Center>
+      </div>
+    </div>
   );
 };
 

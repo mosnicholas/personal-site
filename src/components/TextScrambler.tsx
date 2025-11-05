@@ -1,15 +1,18 @@
 import { useEffect } from 'react';
 
-import { Heading } from '@chakra-ui/react';
-
 import useScrambledText from 'hooks/useScrambledText';
 
 type TextScramblerProps = {
   text: string;
   callback: () => void;
+  className?: string;
 };
 
-const TextScrambler = ({ text, callback }: TextScramblerProps) => {
+const TextScrambler = ({
+  text,
+  callback,
+  className = 'scrambler',
+}: TextScramblerProps) => {
   const scrambledText = useScrambledText(text);
 
   useEffect(() => {
@@ -20,11 +23,11 @@ const TextScrambler = ({ text, callback }: TextScramblerProps) => {
     }
   }, [scrambledText, text, callback]);
 
-  return (
-    <Heading fontFamily="Roboto Mono, sans serif" textAlign="center">
-      {scrambledText}
-    </Heading>
-  );
+  return <h1 className={className}>{scrambledText}</h1>;
+};
+
+TextScrambler.defaultProps = {
+  className: 'scrambler',
 };
 
 export default TextScrambler;
