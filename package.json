@@ -2,6 +2,10 @@
   "name": "personal-site",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.21.0",
+    "yarn": ">=1.22.0"
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
