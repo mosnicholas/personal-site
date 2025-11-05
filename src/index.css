@@ -39,16 +39,35 @@ code {
   font-weight: 700;
 }
 
+.nimo-glitch {
+  font-family: 'Roboto Mono', monospace;
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 700;
+  position: relative;
+  animation: glitch 0.5s linear infinite;
+}
+
+.nimo-glitch::before {
+  content: 'nimo';
+  position: absolute;
+  left: 0;
+  animation: glitchTop 0.5s linear infinite;
+  clip-path: polygon(0 0, 100% 0, 100% 33%, 0 33%);
+}
+
+.nimo-glitch::after {
+  content: 'nimo';
+  position: absolute;
+  left: 0;
+  animation: glitchBottom 1.5s linear infinite;
+  clip-path: polygon(0 67%, 100% 67%, 100% 100%, 0 100%);
+}
+
 .subtitle {
   font-size: 0.875rem;
   color: #9ca3af;
   text-align: center;
-  opacity: 0;
-  animation: fadeIn 0.5s ease-in forwards;
-}
-
-.subtitle.visible {
-  opacity: 1;
 }
 
 .subtitle a {
@@ -61,13 +80,38 @@ code {
   color: #d1d5db;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
+@keyframes glitch {
+  2%, 64% {
+    transform: translate(2px, 0) skew(0deg);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  4%, 60% {
+    transform: translate(-2px, 0) skew(0deg);
+  }
+  62% {
+    transform: translate(0, 0) skew(5deg);
+  }
+}
+
+@keyframes glitchTop {
+  2%, 64% {
+    transform: translate(2px, -2px);
+  }
+  4%, 60% {
+    transform: translate(-2px, 2px);
+  }
+  62% {
+    transform: translate(13px, -1px) skew(-13deg);
+  }
+}
+
+@keyframes glitchBottom {
+  2%, 64% {
+    transform: translate(-2px, 0);
+  }
+  4%, 60% {
+    transform: translate(-2px, 0);
+  }
+  62% {
+    transform: translate(-22px, 5px) skew(21deg);
   }
 }

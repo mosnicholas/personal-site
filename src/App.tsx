@@ -1,10 +1,11 @@
 import { useState } from 'react';
 
+import StreamingText from './components/StreamingText';
 import TextScrambler from './components/TextScrambler';
 
 const App = () => {
   const [showNimo, setShowNimo] = useState(false);
-  const [showSubtitle, setShowSubtitle] = useState(false);
+  const [streamingComplete, setStreamingComplete] = useState(false);
 
   return (
     <div className="app">
@@ -18,16 +19,16 @@ const App = () => {
           />
         ) : (
           <>
-            <h1 className="scrambler">nimo</h1>
-            {!showSubtitle && (
-              <TextScrambler
+            <h1 className="nimo-glitch">nimo</h1>
+            {!streamingComplete ? (
+              <StreamingText
                 text="adventurer, cook, and founder of Junior"
-                callback={() => setShowSubtitle(true)}
+                speed={40}
                 className="subtitle"
+                onComplete={() => setStreamingComplete(true)}
               />
-            )}
-            {showSubtitle && (
-              <div className="subtitle visible">
+            ) : (
+              <div className="subtitle">
                 adventurer, cook, and founder of{' '}
                 <a
                   href="https://myjunior.ai"
