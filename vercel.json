@@ -3,5 +3,11 @@
   "outputDirectory": "build",
   "devCommand": "react-scripts start",
   "installCommand": "yarn install",
-  "framework": "create-react-app"
+  "framework": "create-react-app",
+  "crons": [
+    {
+      "path": "/api/weekly-summary",
+      "schedule": "0 9 * * 0"
+    }
+  ]
 }
