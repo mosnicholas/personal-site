@@ -18,7 +18,7 @@ Cost isn't the reason to do this. Sonnet costs about $0.026 per summary, under $
 ## What we already have
 
 - **370 saved documents with full text** in `document_texts`. Median about 10.8k characters (about 2.7k tokens), 90th percentile 28k, longest 154k (about 38k tokens). 182 are tweets and threads, 167 articles, 13 videos (transcripts), 3 PDFs, a few emails and RSS posts.
-- **A Sonnet 5.5 summary and key points for each** (`documents.summary`, `key_points`; `summary_model` is `claude-sonnet-5-5/3` once the length fix below has been rolled out, and every `/2` summary stays in `llm_traces`). Average 5.4k input tokens, 1.5k output tokens, $0.026 and 13 seconds per summary.
+- **A Sonnet 5.5 summary and key points for each** (`documents.summary`, `key_points`; `summary_model` is `claude-sonnet-5-5/4` once the fix below has been rolled out, and every `/2` summary and key points stay in `llm_traces`). Average 5.4k input tokens, 1.5k output tokens, $0.026 and 13 seconds per summary.
 - **The earlier Haiku 4.5 summaries** in `llm_traces` (kind `document_summary`). Not a fair comparison: Haiku had a different prompt and only the first 40k characters.
 - **The exact request for every call** in `llm_traces.request`, so any candidate can be run on identical inputs, and dated prices in `model_prices` to cost them.
 - **A side-by-side page** (the Haiku vs Sonnet artifact). It compares length only, not quality.
@@ -36,7 +36,11 @@ Short documents get summaries as long as the document. Measured on the 370:
 
 On short threads and changelogs, Sonnet paraphrases every point instead of compressing, even though the prompt said "a short post may need two or three sentences". The spot-checked examples were faithful, just not shorter.
 
-**Fixed before this plan started (`SUMMARY_VERSION` `claude-sonnet-5-5/3`, 2026-10-02):** each request now tells the model the document's word count and limits of about a tenth of it (summary words, 40 minimum; key points about one per 300 words, at most 15), and documents of 150 words or fewer are stored as their own summary with no model call. The eval should confirm the fix didn't cost faithfulness or coverage: compression is exactly where those trade off.
+**Fixed before this plan started (`SUMMARY_VERSION` `claude-sonnet-5-5/4`, 2026-10-02).** The cause was the prompt: it said the summary "stands in for the document", that the reader "may never open the original", and listed everything to keep ("arguments, claims, evidence, numbers, examples"), and Sonnet followed that literally. It also asked for key points "as many as it actually has" on top of the summary.
+
+A first fix (`/3`) gave the model a word limit of about a tenth of the document. It was never rolled out, because the reader doesn't want length rules. Research also suggests they backfire: replacing "no longer than 300 words" with "clear and concise" made LLM summaries up to 150 words shorter ([2410.13961](https://arxiv.org/abs/2410.13961)), and models follow length targets loosely anyway ([2501.00233](https://arxiv.org/abs/2501.00233)). Anthropic's guidance is to explain why rather than add rules ([prompting best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices)).
+
+`/4` is a short prompt that says what summaries are for (recall what a piece said, decide what to read in full, tag and connect documents), asks for the main points and what supports them, "much quicker to read than the document itself", and leaves length to the model. It asks for no key points. Documents of 150 words or fewer are stored as their own summary, with no model call. The eval should confirm this didn't cost faithfulness or coverage: compression is exactly where those trade off.
 
 ## How summaries are evaluated now
 
@@ -145,8 +149,8 @@ All on the same 100 documents, measuring cost and latency from `llm_traces`:
 
 | Candidate | Why |
 | --------- | --- |
-| Sonnet 5.5, current prompt (`/3`, with length limits) | The baseline |
-| Sonnet 5.5, previous prompt (`/2`, no limits) | What the length fix cost or gained |
+| Sonnet 5.5, current prompt (`/4`, short and purpose-led) | The baseline |
+| Sonnet 5.5, previous prompt (`/2`, "stands in for the document") | What the simpler prompt cost or gained |
 | Sonnet 5.5 at `low` effort | More summarizer thinking can hurt faithfulness, and it costs more |
 | Sonnet 5.5 with Citations | Every claim traceable to the source. Needs plain-text output instead of structured outputs (incompatible) |
 | Haiku 4.5, same prompt and full text | The fair rematch; half the price |
