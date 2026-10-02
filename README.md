@@ -16,7 +16,10 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - Answer questions about me in terminal-style
 
 ### Reading Workflows
-- `/api/readwise-webhook` - tags new Readwise Reader documents, reusing existing tags and creating new ones when needed (Claude Haiku 4.5)
+- `/api/readwise-webhook` - summarizes new Readwise Reader documents from their full text and tags them, reusing existing tags and creating new ones when needed (Claude Haiku 4.5)
+- `/api/sync-documents` - daily cron that mirrors the library into Postgres and fills in missing summaries
+- `/api/tag-glossary` - weekly cron where Claude Opus 5.5 defines and clusters every tag and Claude Sonnet 5.5 writes a brief per tag
+- `/reading` - a public map of everything I've saved: tag clusters, how they've moved over time, and a brief per tag
 - `/api/rebalance-tags` - weekly cron where Claude Opus 5.5 merges duplicate and overlapping tags
 - Every LLM call is saved to Postgres (request, response, result) for comparing models later
 - `/api/weekly-summary` - weekly cron that emails a Claude Opus 5.5 summary of my reading

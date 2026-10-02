@@ -1,19 +1,20 @@
 # Personal Site - Code Structure & Context
 
 ## Project Overview
-Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Three parts:
+Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Four parts:
 
 1. **Landing page** - "nicholas moschopoulos" scrambles in, becomes a glitching "nimo", and the tagline streams in like an LLM response.
 2. **Terminal mode** (`?mode=terminal`, or press `~`/`t` on the landing page) - retro boot sequence, then a chat with a Claude-powered assistant about nimo.
-3. **Reading workflows** (migrated from n8n) - a Readwise webhook that tags new documents from a tag taxonomy, a weekly cron that rebalances the taxonomy, a weekly cron that emails an AI summary of the week's reading, and a monthly cron that emails a longer synthesis.
+3. **Reading workflows** (migrated from n8n) - a Readwise webhook that summarizes and tags new documents, a daily sync that mirrors the library into Postgres, weekly crons that rebalance the taxonomy, write a tag glossary, and email a summary of the week's reading, and a monthly cron that emails a longer synthesis.
+4. **Reading map** (`/reading`, public) - a force-directed map of the tags, clustered, with a timeline and per-tag briefs, served from the mirror.
 
 ## Tech Stack
 - **React 19.3** + **TypeScript 6.0** (strict), vanilla CSS
 - **Vite 8** for dev server and build (migrated from the deprecated Create React App)
 - **Vercel** for hosting; `/api/*.ts` are Vercel Functions
 - **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
-- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and tagging, `claude-opus-5-5` for the weekly tag rebalance and summary and the monthly synthesis
-- **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log
+- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat, document summaries and tagging, `claude-sonnet-5-5` for tag briefs, `claude-opus-5-5` for the weekly tag rebalance, glossary and summary, and the monthly synthesis
+- **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log, the library mirror with our summaries, and the tag glossary
 - **Resend** for email (personal account, `nimo.fyi` verified; sender `reader@nimo.fyi`, recipient `WEEKLY_SUMMARY_RECIPIENT_EMAIL`)
 - ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
 
@@ -26,38 +27,48 @@ personal-site/
 ├── src/
 │   ├── index.tsx              # createRoot + font imports
 │   ├── index.css              # All styles and animations
-│   ├── App.tsx                # Picks Landing vs TerminalMode from the URL
+│   ├── App.tsx                # Picks Landing, TerminalMode, or the lazy-loaded /reading page from the URL
 │   ├── components/
 │   │   ├── TextScrambler.tsx  # Scramble animation, fires onComplete after holdMs
 │   │   ├── StreamingText.tsx  # Char-by-char reveal
 │   │   ├── Tagline.tsx        # "adventurer, cook, and founder of Junior" + link
 │   │   ├── TerminalMode.tsx   # Boot sequence (staged timeouts) then chat
-│   │   └── ChatInterface.tsx  # Terminal chat UI, POSTs to /api/chat
+│   │   ├── ChatInterface.tsx  # Terminal chat UI, POSTs to /api/chat
+│   │   └── reading/           # /reading: tag map, cluster legend, timeline, tag panel
 │   ├── hooks/useScrambledText.ts
 │   └── utils/textScramble.ts  # Scramble algorithm
 ├── api/
 │   ├── chat.ts                # Terminal assistant (system prompt lives here)
-│   ├── readwise-webhook.ts    # Tags new Readwise Reader docs from the taxonomy
+│   ├── readwise-webhook.ts    # Summarizes and tags new Readwise Reader docs, mirrors them
+│   ├── sync-documents.ts      # Daily 6am UTC cron: mirror the library, write missing summaries
 │   ├── rebalance-tags.ts      # Sunday 7am UTC cron: rebalance the taxonomy
+│   ├── tag-glossary.ts        # Sunday 8am UTC cron: define and cluster tags, write tag briefs
 │   ├── weekly-summary.ts      # Sunday 9am UTC cron: email the reading summary
 │   ├── reading-synthesis.ts   # 1st of the month 10am UTC cron: email a synthesis of the last 90 days
+│   ├── reading-graph.ts       # Public, CDN-cached data for /reading
 │   ├── tsconfig.json          # Node/ESM config; Vercel also uses it to compile /api
 │   └── _lib/                  # Helpers; underscore keeps Vercel from deploying them as functions
 │       ├── anthropic.ts       # Shared Anthropic client (checks ANTHROPIC_API_KEY)
 │       ├── auth.ts            # Constant-time secret comparison, cron auth
+│       ├── db.ts              # Shared Neon client; creates all tables on first use
+│       ├── documents.ts       # The `documents` mirror: upserts, our summaries, tag counts, sync state
 │       ├── email.ts           # Resend client
+│       ├── glossary.ts        # Opus definitions + clusters, Sonnet tag briefs (`tags` table)
+│       ├── graph.ts           # Queries behind /api/reading-graph
 │       ├── rate-limit.ts      # In-memory per-instance rate limiter for /api/chat
 │       ├── readwise.ts        # Readwise Reader v3 client (list, tags, bulk update)
 │       ├── rebalance.ts       # Weekly rebalance: sweep, Opus plan, bulk rewrite
+│       ├── summarize.ts       # Our document summaries (Haiku 4.5, full text) + HTML to text
 │       ├── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming); parses SUBJECT + HTML
+│       ├── sync.ts            # Resumable library listing and summary backfill
 │       ├── synthesis.ts       # Monthly/one-off synthesis prompt and request (Opus 5.5)
 │       ├── tagging.ts         # Haiku tagger: reuses existing tags, creates new ones when needed
-│       ├── taxonomy.ts        # `other` tag, tag normalization, cached tag list
+│       ├── taxonomy.ts        # `other` tag, tag normalization, cached tag list with counts and definitions
 │       └── traces.ts          # Saves every LLM call to Postgres (`llm_traces`)
 ├── vite.config.ts
 ├── eslint.config.js
 ├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
-├── vercel.json                # framework: vite, fluid: true (300s functions), crons
+├── vercel.json                # framework: vite, fluid: true (300s functions), /reading rewrite, crons
 └── .npmrc                     # min-release-age=7
 ```
 
@@ -74,15 +85,20 @@ personal-site/
 - `ChatInterface` refocuses the prompt on any keypress, draws a fake block cursor at `input.length` ch (monospace font), and keeps the conversation in React state: each request sends the last 20 messages, skipping error notices and the messages that got them. Reloading the page starts a new conversation
 - On touch devices the landing hint reads "Tap for terminal mode" (CSS `hover: none` media query); it's a link to `?mode=terminal` everywhere
 
+### Library mirror and our summaries
+- Readwise is the source of truth for documents, reading state and tags; Postgres keeps a mirror (`documents`) so everything else can read without Readwise's 20 requests/min limit
+- The mirror is kept fresh by the daily sync (resumable listing from the last complete sync, page cursor in `sync_state`), the webhook (upserts on save) and the rebalance (writes tags it applied)
+- Our summaries (`summary`, `key_points`) are written by Haiku 4.5 from the full text (`withHtmlContent`, ~40k chars max) for saved documents only, not feed items (cost). The webhook writes one on save when the text is ready; the sync fills in the rest, 3 attempts per document. Every consumer prefers ours and falls back to Readwise's summary
+
 ### Tag taxonomy (knowledge graph)
 - Readwise is the source of truth: the taxonomy is the set of tags in use, normalized to lowercase kebab-case
-- The taxonomy is still being created, so the save-time tagger (Haiku 4.5) may create tags: it's shown the existing tags, told to reuse them, and creates one only when none covers a main topic. `other` is for documents it can't place. Don't swap in a closed-set classifier (decision models like Jev) while tags are still being created
+- The taxonomy is still being created, so the save-time tagger (Haiku 4.5) may create tags: it sees every existing tag as `name (documents): definition` (from the mirror and the glossary), is told to reuse them, and creates one only when none covers a main topic. `other` is for documents it can't place. Don't swap in a closed-set classifier (decision models like Jev) while tags are still being created
+- Weekly glossary (`tag-glossary.ts`, after the rebalance): Opus 5.5 at `low` effort defines every tag in at most 15 words and sorts tags into 6-12 named clusters, keeping last week's unless wrong; it's skipped if under 6 days old (`?redefine=true` forces it). Sonnet 5.5 writes a public brief for each tag with 3+ saved documents whose count changed
 - Weekly, Opus 5.5 returns a structured plan (`merges`, `other_documents`); code validates it (no merging into/out of `other`, only known tags and documents) and rewrites tags with Readwise's bulk update
 - Earlier runs' merges (`loadAppliedRenames()`, read from rebalance traces, newest wins) are passed to Opus as `earlier_merges`, applied to returning retired tags, and used to resolve plan targets, so a plan can't reverse an earlier merge
-- Classifier only sees tag names, so names must be self-explanatory
 
 ### LLM traces
-- Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `rebalance`, `weekly_summary`, `reading_synthesis`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
+- Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `document_summary`, `rebalance`, `tag_glossary`, `tag_brief`, `weekly_summary`, `reading_synthesis`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
 - Rebalance traces also store every applied change (`id`, `title`, `before` → `after` tags), which is the undo log, and `renames`, which later runs build on
 - Neon's free plan stops writes at 1 GB without warning, so the weekly email ends with `describeTraceStorage()` (size, % of 1 GB, call count; a warning from 80%)
 - Tracing never breaks the caller; without `DATABASE_URL` it's skipped. New LLM calls should be traced too
@@ -93,6 +109,9 @@ personal-site/
 - `readwise-webhook.ts`: only handles `*document.created` events to avoid loops (anything else gets a 200 `skipped`, no secret needed); acts only with a matching `READWISE_WEBHOOK_SECRET` (Readwise sends it as `secret` in the body), and answers 200 without acting while it's unset, because Readwise won't create the webhook (and reveal the secret) until its endpoint test passes; tags the document via `classifyDocument` against the current taxonomy and replaces its tags (the user never tags by hand)
 - `rebalance-tags.ts`: same cron auth; `?days=` (default 8) sets how far back to look for untagged documents, so a big value backfills. Applies changes directly, no review step. Works within a ~220s time budget and reports `incomplete` if it stopped early; it's idempotent, so the next run continues. The sweep lists each location a page at a time (library first, then the feed, which can hold thousands of items against a 20 requests/min limit), tags as it goes, and skips the Opus plan until nothing is left untagged
 - `weekly-summary.ts`: requires `Authorization: Bearer $CRON_SECRET` (Vercel cron sends this; `rejectUnauthorizedCron` in `_lib/auth.ts`); `?days=` (1-31), `?email=false`, `?save=false` for manual runs. It summarizes documents saved or opened in the window, not everything updated: rewriting tags can bump `updated_at` on old documents. The summary is written by Claude Opus 5.5 at `medium` effort with server-side refusal fallbacks (`fallbacks: "default"`)
+- `sync-documents.ts`: same cron auth; ~220s budget, half for listing; `?summarize=false` lists only. Reports `incomplete` until the listing is caught up and no saved document lacks a summary
+- `tag-glossary.ts`: same cron auth; definitions, then briefs until the budget runs out (`incomplete` while briefs remain)
+- `reading-graph.ts`: public, no auth, `Cache-Control: s-maxage=3600, stale-while-revalidate=86400`. Without params: tags (count, cluster, definition), clusters, edges (tag pairs sharing 2+ documents), 52-week timeline by cluster. `?tag=<name>`: definition, brief, up to 200 documents (title, site, original URL, saved date). Saved documents only, never reading state
 - `reading-synthesis.ts`: same cron auth; `?days=` (default 90, so each monthly email covers a quarter; max 183), `?email=false`, `?dry_run=true` (counts and approximate input tokens, no model call). Covers documents saved to the library (`new`, `later`, `shortlist`, `archive`) in the window, with their highlights; one Opus 5.5 call at `medium` effort writes themes, change over time, meta observations, what to read, and questions. It must finish within 300s, so the prompt asks for ~3,000 words
 
 ## Development
@@ -131,7 +150,7 @@ npm run format
 - **Colors**: `src/index.css` (background `#000`, text `#fff`, subtitle `#9ca3af`, terminal `#00ff00`)
 - **Terminal assistant persona**: `SYSTEM_PROMPT` in `api/chat.ts`
 - **Tagging**: `MAX_TAGS` and rules in `SYSTEM_PROMPT` in `api/_lib/tagging.ts`; taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
-- **Reading models**: `PLAN_MODEL` in `api/_lib/rebalance.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts`
+- **Reading models**: `SUMMARY_MODEL` in `api/_lib/summarize.ts` (document summaries), `PLAN_MODEL` in `api/_lib/rebalance.ts`, `GLOSSARY_MODEL` / `BRIEF_MODEL` in `api/_lib/glossary.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts` (weekly email)
 - **Chat rate limits**: `perIpLimit` / `overallLimit` in `api/chat.ts`
 
 ## Commit Style

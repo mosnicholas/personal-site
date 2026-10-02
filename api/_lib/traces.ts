@@ -2,15 +2,21 @@
  * Persistent log of every LLM call, so models and prompts can be compared
  * later: the exact request, the full response, and what the app did with it.
  *
- * Stored in Postgres (Neon's free plan via the Vercel Marketplace, which sets
- * DATABASE_URL). The table is created on first use. Tracing never breaks the
- * caller: without DATABASE_URL, or if a write fails, it logs and moves on.
+ * Stored in Postgres (see db.ts). Tracing never breaks the caller: without
+ * DATABASE_URL, or if a write fails, it logs and moves on.
  */
 
-import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
+import { getSql } from './db.js';
 
 export type TraceKind =
-  'chat' | 'tagging' | 'rebalance' | 'weekly_summary' | 'reading_synthesis';
+  | 'chat'
+  | 'tagging'
+  | 'document_summary'
+  | 'rebalance'
+  | 'tag_glossary'
+  | 'tag_brief'
+  | 'weekly_summary'
+  | 'reading_synthesis';
 
 export interface Trace {
   kind: TraceKind;
@@ -27,38 +33,7 @@ export interface Trace {
   error?: string;
 }
 
-type Sql = NeonQueryFunction<false, false>;
-
-let ready: Promise<Sql> | undefined;
 let warnedMissingUrl = false;
-
-function getSql(): Promise<Sql> | undefined {
-  const url = process.env.DATABASE_URL;
-  if (!url) return undefined;
-
-  ready ??= (async () => {
-    const sql = neon(url);
-    await sql`
-      CREATE TABLE IF NOT EXISTS llm_traces (
-        id bigserial PRIMARY KEY,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        kind text NOT NULL,
-        subject_id text,
-        model text NOT NULL,
-        request jsonb NOT NULL,
-        response jsonb,
-        result jsonb,
-        latency_ms integer NOT NULL,
-        error text,
-        git_sha text
-      )`;
-    await sql`
-      CREATE INDEX IF NOT EXISTS llm_traces_kind_subject
-      ON llm_traces (kind, subject_id, created_at)`;
-    return sql;
-  })();
-  return ready;
-}
 
 const toJson = (value: unknown) =>
   value === undefined ? null : JSON.stringify(value);
@@ -89,8 +64,6 @@ export async function recordTrace(trace: Trace): Promise<void> {
         ${process.env.VERCEL_GIT_COMMIT_SHA ?? null}
       )`;
   } catch (error) {
-    // Retry table setup on the next call in case that's what failed
-    ready = undefined;
     console.warn('Could not save LLM trace:', error);
   }
 }
@@ -127,7 +100,6 @@ export async function loadAppliedRenames(): Promise<Map<string, string>> {
       }
     }
   } catch (error) {
-    ready = undefined;
     console.warn('Could not load earlier tag merges:', error);
   }
   return renames;
@@ -156,7 +128,6 @@ export async function describeTraceStorage(): Promise<string> {
       ? `LLM trace log: ${usage}.`
       : `LLM trace log is nearly full: ${usage}. New traces stop saving at 1 GB; delete old chat traces or upgrade the Neon plan.`;
   } catch (error) {
-    ready = undefined;
     const message = error instanceof Error ? error.message : String(error);
     return `LLM trace log: couldn't check its size (${message}).`;
   }

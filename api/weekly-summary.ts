@@ -1,4 +1,5 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
+import { ourSummaries } from './_lib/documents.js';
 import { sendReadingEmail } from './_lib/email.js';
 import { fetchArticles, saveDocument } from './_lib/readwise.js';
 import { generateWeeklySummary } from './_lib/summary.js';
@@ -79,13 +80,16 @@ export default {
         });
       }
 
+      // Our summaries (from the full text) where we have them
+      const ours = await ourSummaries(articlesToSummarize.map((a) => a.id));
       const summary = await generateWeeklySummary(
         articlesToSummarize.map((a) => ({
           id: a.id,
           title: a.title,
           author: a.author,
           url: a.url,
-          summary: a.summary,
+          summary: ours.get(a.id)?.summary ?? a.summary,
+          keyPoints: ours.get(a.id)?.keyPoints,
           tags: a.tags,
           reading_progress: a.reading_progress,
         })),

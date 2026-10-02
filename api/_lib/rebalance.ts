@@ -21,8 +21,9 @@ import {
   fetchTags,
   type Location,
 } from './readwise.js';
+import { ourSummaries, setDocumentTags, tagsInUse } from './documents.js';
 import { classifyDocument } from './tagging.js';
-import { normalizeTag, OTHER_TAG } from './taxonomy.js';
+import { getTaxonomy, normalizeTag, OTHER_TAG } from './taxonomy.js';
 import { loadAppliedRenames, recordTrace } from './traces.js';
 
 const PLAN_MODEL = 'claude-opus-5-5';
@@ -43,7 +44,7 @@ const PLAN_RESERVE_MS = 120_000;
 
 const SYSTEM_PROMPT = `You curate the tag taxonomy of a personal reading library in Readwise Reader. A tagger labels documents as they're saved: it reuses existing tags when they fit and creates new ones otherwise, so each week brings new tags, and some duplicate or overlap existing ones. Tag names must be self-explanatory: lowercase kebab-case, specific enough to be useful, broad enough to group related reading (for example \`machine-learning\`, \`startup-fundraising\`, \`home-cooking\`).
 
-Documents the tagger couldn't place are tagged \`other\`. Each week you get the current tags, the documents in \`other\`, and \`earlier_merges\`, which maps tags retired in earlier weeks to the tag that replaced them. Build on those: don't bring a retired name back, and don't merge a replacement back into a tag it replaced. You return:
+Documents the tagger couldn't place are tagged \`other\`. Each week you get the current tags (with how many documents use each), the documents in \`other\`, and \`earlier_merges\`, which maps tags retired in earlier weeks to the tag that replaced them. Build on those: don't bring a retired name back, and don't merge a replacement back into a tag it replaced. You return:
 
 1. merges: tags that mean the same thing or nearly so - synonyms, singular and plural, formatting variants, or a tag too narrow to stand on its own next to a broader one. List the tags to retire in \`from\` and the tag they become in \`into\`, which can be an existing tag or a clearer new name. Keep distinct concepts separate even when they're related. Never merge into or out of \`other\`. Leave out tags that are fine as they are.
 2. other_documents: tags for each document in \`other\`, using tag names as they'll be after your merges. Use existing tags where they fit. Create a new tag when it would apply to at least two of these documents or clearly names a lasting interest of this reader. If nothing fits yet, return an empty list for that document; it stays in \`other\` until similar documents arrive.`;
@@ -119,6 +120,11 @@ async function planRebalance(
   otherDocuments: Article[],
   earlierRenames: Map<string, string>,
 ): Promise<PlanCall> {
+  // Document counts help pick which of two duplicates to keep
+  const counts = new Map(
+    (await tagsInUse())?.map((tag) => [tag.name, tag.documents]) ?? [],
+  );
+  const summaries = await ourSummaries(otherDocuments.map((doc) => doc.id));
   const request = {
     model: PLAN_MODEL,
     max_tokens: 32000,
@@ -135,14 +141,17 @@ async function planRebalance(
         role: 'user' as const,
         content: JSON.stringify(
           {
-            tags: taxonomy,
+            tags: taxonomy.map((name) => ({
+              name,
+              documents: counts.get(name),
+            })),
             earlier_merges: Object.fromEntries(earlierRenames),
             other_documents: otherDocuments.map((doc) => ({
               id: doc.id,
               title: doc.title,
               author: doc.author,
               site: doc.site_name,
-              summary: doc.summary,
+              summary: summaries.get(doc.id)?.summary ?? doc.summary,
             })),
           },
           null,
@@ -225,6 +234,7 @@ export async function rebalanceTags({
   // further each run instead of spending its budget listing
   const since = new Date(Date.now() - sweepDays * 24 * 60 * 60 * 1000);
   const missed: Article[] = [];
+  const taggerTaxonomy = await getTaxonomy();
   sweep: for (const location of SWEEP_LOCATIONS) {
     for await (const page of articlePages({
       updatedAfter: since,
@@ -235,6 +245,7 @@ export async function rebalanceTags({
       for (let i = 0; i < docs.length; i += CLASSIFY_CONCURRENCY) {
         if (outOfTime(SWEEP_RESERVE_MS)) break sweep;
         const batch = docs.slice(i, i + CLASSIFY_CONCURRENCY);
+        const summaries = await ourSummaries(batch.map((doc) => doc.id));
         const results = await Promise.all(
           batch.map((doc) =>
             classifyDocument(
@@ -243,9 +254,10 @@ export async function rebalanceTags({
                 title: doc.title,
                 author: doc.author,
                 url: doc.url,
-                summary: doc.summary,
+                summary: summaries.get(doc.id)?.summary ?? doc.summary,
+                keyPoints: summaries.get(doc.id)?.keyPoints,
               },
-              taxonomy,
+              taggerTaxonomy,
             ).catch((error) => {
               console.warn(`Could not classify ${doc.id}:`, error);
               return undefined;
@@ -361,6 +373,12 @@ export async function rebalanceTags({
   }
 
   const { updated, failed } = await bulkUpdateTags(updates);
+  // Keep the mirror in step with what Readwise accepted
+  const failedIds = new Set(failed.map((entry) => entry.split(':')[0]));
+  await setDocumentTags(updates.filter(({ id }) => !failedIds.has(id))).catch(
+    (error: unknown) =>
+      console.warn('Could not update tags in the mirror:', error),
+  );
 
   // Keep the plan and every change it caused (before -> after), so a run can
   // be audited or undone, and plans compared across models

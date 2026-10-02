@@ -26,6 +26,7 @@ export async function generateWeeklySummary(
     author: string | null;
     url: string;
     summary: string | null;
+    keyPoints?: string[];
     tags: Record<string, unknown>;
     reading_progress: number;
   }[],
@@ -56,7 +57,7 @@ Then provide the HTML content.`;
         `${i + 1}. "${a.title}" by ${a.author ?? 'Unknown'}
    URL: ${a.url}
    Progress: ${Math.round(a.reading_progress * 100)}%
-   Summary: ${a.summary ?? 'No summary'}
+   Summary: ${a.summary ?? 'No summary'}${a.keyPoints?.length ? `\n   Key points: ${a.keyPoints.join(' | ')}` : ''}
    Tags: ${Object.keys(a.tags).join(', ') || 'None'}`,
     )
     .join('\n\n');

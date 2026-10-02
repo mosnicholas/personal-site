@@ -2,10 +2,22 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "fluid": true,
+  "rewrites": [
+    { "source": "/reading", "destination": "/index.html" },
+    { "source": "/reading/", "destination": "/index.html" }
+  ],
   "crons": [
+    {
+      "path": "/api/sync-documents",
+      "schedule": "0 6 * * *"
+    },
     {
       "path": "/api/rebalance-tags",
       "schedule": "0 7 * * 0"
+    },
+    {
+      "path": "/api/tag-glossary",
+      "schedule": "0 8 * * 0"
     },
     {
       "path": "/api/weekly-summary",

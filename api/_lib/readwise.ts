@@ -32,6 +32,8 @@ export interface Article {
   saved_at: string | null;
   first_opened_at: string | null;
   last_opened_at: string | null;
+  /** Only when requested with `withHtmlContent` */
+  html_content?: string | null;
 }
 
 export interface Tag {
@@ -39,7 +41,7 @@ export interface Tag {
   name: string;
 }
 
-interface Page<T> {
+export interface Page<T> {
   count: number;
   nextPageCursor: string | null;
   results: T[];
@@ -208,6 +210,19 @@ export async function fetchArticles(
 }
 
 /**
+ * One page (up to 100 articles), from `pageCursor` if given, so a long listing
+ * can be resumed by a later run
+ */
+export async function fetchArticlePage(
+  filter: ArticleFilter,
+  pageCursor?: string | null,
+): Promise<Page<Article>> {
+  const params = articleParams(filter);
+  if (pageCursor) params.set('pageCursor', pageCursor);
+  return makeRequest<Page<Article>>(`/list/?${params}`);
+}
+
+/**
  * Like fetchArticles, but a page (up to 100 articles) at a time, so callers
  * can work through a big list and stop when they run out of time
  */
@@ -232,10 +247,15 @@ export function articleTagNames(article: Pick<Article, 'tags'>): string[] {
 }
 
 /**
- * Fetch a single article by ID (the list endpoint is the only way to read one)
+ * Fetch a single article by ID (the list endpoint is the only way to read
+ * one), optionally with its full HTML in `html_content`
  */
-export async function fetchArticle(id: string): Promise<Article | undefined> {
+export async function fetchArticle(
+  id: string,
+  { withHtmlContent = false } = {},
+): Promise<Article | undefined> {
   const params = new URLSearchParams({ id });
+  if (withHtmlContent) params.set('withHtmlContent', 'true');
   const response = await makeRequest<ArticleListResponse>(`/list/?${params}`);
   return response.results[0];
 }

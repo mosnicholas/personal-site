@@ -28,7 +28,7 @@ The cron endpoints refuse requests when `CRON_SECRET` isn't set. Until `READWISE
 Push to `main` (or click "Deploy"). Vercel will:
 - Run `npm install` from `package-lock.json`
 - Run `npm run build` (type-checks the frontend **and** the API, then builds)
-- Deploy each file in `/api` as a function and register the crons (two weekly, one monthly)
+- Deploy each file in `/api` as a function and register the crons (one daily, three weekly, one monthly)
 
 ### 4. Protect the chat endpoint (free)
 `/api/chat` is public and spends your Anthropic credits, so it has three layers:
@@ -64,12 +64,25 @@ The endpoint has to be live in production first (step 3).
     "https://<your-domain>/api/rebalance-tags?days=3650"
   ```
 
+## Library mirror and our summaries
+
+Readwise stays the source of truth, and Postgres keeps a mirror of the library (`documents`) so the tagger, the emails and `/reading` don't hit Readwise's 20 requests/min limit.
+
+- **Daily** (`/api/sync-documents`, 6am UTC): copies documents that changed in Readwise into the mirror, then has Claude Haiku 4.5 summarize saved documents that don't have our summary yet, from their full text (2-4 sentences plus key points). Feed items keep Readwise's summary.
+- **On save**: the webhook writes our summary straight away when Readwise has the text ready; otherwise the next daily sync does.
+- **Backfill**: the first sync lists the whole library and summarizes it over several runs. Run it until `incomplete` is false (`?summarize=false` lists only, to see the size first):
+  ```bash
+  curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-domain>/api/sync-documents"
+  ```
+  Summaries cost about a cent per document (Haiku 4.5, up to ~10k tokens of text each).
+
 ## Tagging and the knowledge graph
 
 Readwise holds the taxonomy: it's the set of tags in use.
 
-- **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 gives the document up to 5 tags for its main topics. It's shown the existing tags and told to reuse them, and creates a new tag only when none fits, since the taxonomy is still growing. Documents it can't place get `other`.
+- **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 gives the document up to 5 tags for its main topics, from our summary. It sees every existing tag with how many documents use it and its glossary definition, is told to reuse them, and creates a new tag only when none fits, since the taxonomy is still growing. Documents it can't place get `other`.
 - **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate and overlapping tags and sorts out `other`. Everything is applied straight away; the plan and every before → after change (with document titles) are saved in the trace log.
+- **Glossary** (`/api/tag-glossary`, Sundays 8am UTC, after the cleanup): Claude Opus 5.5 writes a one-line definition for every tag (what it covers, and what it doesn't when a neighbor is close) and sorts the tags into 6-12 named clusters, keeping last week's where they still fit. The tagger reads the definitions. Claude Sonnet 5.5 then writes a brief for each tag with 3+ saved documents whose count changed. Reruns within 6 days only continue the briefs (`?redefine=true` redoes the definitions).
 - **Merges stick:** each run reads earlier runs' merges from the trace log. They're shown to Opus, a retired tag that comes back is folded into its replacement without asking, and a plan can't merge a tag back into one it replaced (the first backfill flipped `ux-design` and `user-experience` between two runs).
 
 To see every change a rebalance made, in the Neon SQL editor:
@@ -84,16 +97,20 @@ WHERE r.kind = 'rebalance'
 ORDER BY r.created_at, title;
 ```
 
+## /reading (public)
+
+`nimo.fyi/reading` maps everything saved to the library: a force-directed graph of the tags (size = documents, colour = cluster, links = tags that share documents), the clusters over time, and a panel per tag with its definition, brief and documents. It reads `/api/reading-graph`, which is public and cached at Vercel's CDN for an hour. Feed items and reading state never appear. The clusters and briefs show up after the first glossary run.
+
 ## Reading synthesis
 
-`/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 90 days, so each month's email shows the longer arc (`?days=` from 1 to 183 for a one-off over another window). The first one, over 92 days with 89 documents, took about 3 minutes. Claude Opus 5.5 gets each document's title, source, date, tags, Readwise summary, how far you got, and your notes and highlights, and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
+`/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 90 days, so each month's email shows the longer arc (`?days=` from 1 to 183 for a one-off over another window). The first one, over 92 days with 89 documents, took about 3 minutes. Claude Opus 5.5 gets each document's title, source, date, tags, our summary and key points (Readwise's where we don't have one), how far you got, and your notes and highlights, and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
 
 ## LLM trace log (Neon Postgres, free)
 
-Every LLM call (chat, tagging, rebalance, weekly summary, reading synthesis) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare.
+Every LLM call (chat, document summaries, tagging, rebalance, glossary, tag briefs, weekly summary, reading synthesis) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare.
 
 1. Vercel → your project → Storage → Create Database → Neon → Free plan → connect it to the project. This sets `DATABASE_URL`
-2. Redeploy. The table is created on the first trace
+2. Redeploy. The tables (`llm_traces`, `documents`, `tags`, `sync_state`) are created on first use
 3. Query it in the Neon console's SQL editor, e.g.
    ```sql
    SELECT created_at, subject_id, result FROM llm_traces WHERE kind = 'tagging' ORDER BY created_at DESC;
@@ -139,9 +156,13 @@ Visit `http://localhost:3000?mode=terminal`.
 personal-site/
 ├── api/
 │   ├── chat.ts              # Terminal chat (Claude Haiku 4.5, rate limited)
-│   ├── readwise-webhook.ts  # Tags new Readwise documents from the taxonomy (Haiku 4.5)
+│   ├── readwise-webhook.ts  # Summarizes and tags new Readwise documents (Haiku 4.5)
+│   ├── sync-documents.ts    # Daily library mirror + summary backfill (Haiku 4.5)
 │   ├── rebalance-tags.ts    # Weekly taxonomy rebalance cron (Opus 5.5)
+│   ├── tag-glossary.ts      # Weekly tag definitions, clusters (Opus 5.5) and briefs (Sonnet 5.5)
 │   ├── weekly-summary.ts    # Weekly reading summary cron (Opus 5.5)
+│   ├── reading-synthesis.ts # Monthly 90-day synthesis cron (Opus 5.5)
+│   ├── reading-graph.ts     # Public data for /reading
 │   └── _lib/                # Shared helpers (underscore = not deployed as functions)
 ├── src/                     # React app
 ├── index.html               # Vite entry
@@ -169,7 +190,9 @@ Edit `MODEL` in `api/chat.ts` (currently `claude-haiku-4-5`). Model list: https:
 Edit the `SYSTEM_PROMPT` constant in `api/chat.ts`.
 
 ### Change the reading models
+- Document summaries: `SUMMARY_MODEL` and `SYSTEM_PROMPT` in `api/_lib/summarize.ts`
 - Tagging: `TAGGING_MODEL`, `MAX_TAGS`, and the tagging rules in `SYSTEM_PROMPT` in `api/_lib/tagging.ts`
+- Glossary and briefs: `GLOSSARY_MODEL`, `BRIEF_MODEL` and their prompts in `api/_lib/glossary.ts`
 - Rebalance: `PLAN_MODEL` and the taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
 - Weekly summary: `SUMMARY_MODEL` in `api/_lib/summary.ts` (Claude via the Anthropic SDK)
 

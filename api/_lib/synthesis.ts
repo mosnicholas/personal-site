@@ -6,6 +6,7 @@
  */
 
 import { getAnthropic } from './anthropic.js';
+import type { OurSummary } from './documents.js';
 import { type Article, articleTagNames } from './readwise.js';
 import { parseEmailResponse } from './summary.js';
 import { tracedCall } from './traces.js';
@@ -17,7 +18,7 @@ const MAX_SUMMARY_CHARS = 600;
 const MAX_HIGHLIGHTS_PER_DOCUMENT = 5;
 const MAX_HIGHLIGHT_CHARS = 400;
 
-const SYSTEM_PROMPT = `You write a reading synthesis for one reader: nimo, founder and CEO of Junior (myjunior.ai), an AI startup, who also loves adventure travel and cooking. You get every document they saved to Readwise Reader over a stretch of time: title, source, date saved, tags, Readwise's summary, how far they got, and any notes and highlights. They saved far more than they read, so this email has to tell them what the documents say without reading them, and then step back and think about the reading itself.
+const SYSTEM_PROMPT = `You write a reading synthesis for one reader: nimo, founder and CEO of Junior (myjunior.ai), an AI startup, who also loves adventure travel and cooking. You get every document they saved to Readwise Reader over a stretch of time: title, source, date saved, tags, a summary with key points, how far they got, and any notes and highlights. They saved far more than they read, so this email has to tell them what the documents say without reading them, and then step back and think about the reading itself.
 
 Write to the reader directly, as "you", in these sections:
 
@@ -42,6 +43,7 @@ interface SynthesisDocument {
   read: string;
   tags: string[];
   summary: string | null;
+  key_points?: string[];
   note?: string;
   highlights?: { text?: string; note?: string }[];
 }
@@ -63,6 +65,7 @@ function readStatus(progress: number): string {
 export function prepareDocuments(
   documents: Article[],
   highlights: Article[],
+  summaries: Map<string, OurSummary>,
 ): SynthesisDocument[] {
   const highlightsByDocument = new Map<string, Article[]>();
   for (const highlight of highlights) {
@@ -91,7 +94,12 @@ export function prepareDocuments(
         type: doc.category,
         read: readStatus(doc.reading_progress),
         tags: articleTagNames(doc),
-        summary: truncate(doc.summary, MAX_SUMMARY_CHARS) ?? null,
+        // Ours (from the full text) when we have it, otherwise Readwise's
+        summary:
+          summaries.get(doc.id)?.summary ??
+          truncate(doc.summary, MAX_SUMMARY_CHARS) ??
+          null,
+        key_points: summaries.get(doc.id)?.keyPoints,
         note: truncate(doc.notes, MAX_HIGHLIGHT_CHARS),
         highlights: docHighlights.length > 0 ? docHighlights : undefined,
       };

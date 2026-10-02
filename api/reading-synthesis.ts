@@ -1,4 +1,5 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
+import { ourSummaries } from './_lib/documents.js';
 import { sendReadingEmail } from './_lib/email.js';
 import { type Article, fetchArticles, type Location } from './_lib/readwise.js';
 import {
@@ -78,7 +79,11 @@ export default {
         console.warn('Could not load highlights:', error);
       }
 
-      const prepared = prepareDocuments(documents, highlights);
+      const prepared = prepareDocuments(
+        documents,
+        highlights,
+        await ourSummaries(documents.map((doc) => doc.id)),
+      );
       const synthesisRequest = buildSynthesisRequest(prepared, since, until);
       const inputChars =
         synthesisRequest.system.length +
