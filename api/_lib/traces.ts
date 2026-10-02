@@ -125,27 +125,51 @@ export async function loadAppliedRenames(): Promise<Map<string, string>> {
 const STORAGE_LIMIT_BYTES = 1024 ** 3;
 const STORAGE_WARN_RATIO = 0.8;
 
+const count = (n: unknown, noun: string) =>
+  `${Number(n).toLocaleString('en-US')} ${noun}${Number(n) === 1 ? '' : 's'}`;
+
 /**
- * One line on how full the trace database is, for the weekly email
+ * A few lines for the weekly email: how full the database is (Neon gives no
+ * warning), what the LLM calls cost this week, and any calls from a model
+ * missing from pricing.ts, whose cost would otherwise go uncounted
  */
-export async function describeTraceStorage(): Promise<string> {
+export async function describeTraceLog(): Promise<string> {
   const sqlPromise = getSql();
   if (!sqlPromise) return 'LLM trace log is off: DATABASE_URL is not set.';
   try {
     const sql = await sqlPromise;
+    // Neon's 1 GB counts every database in the project, not just ours
     const [row] = await sql`
-      SELECT pg_database_size(current_database()) AS bytes,
-             (SELECT count(*) FROM llm_traces) AS calls`;
+      SELECT
+        (SELECT sum(pg_database_size(datname)) FROM pg_database
+          WHERE has_database_privilege(datname, 'CONNECT')) AS bytes,
+        (SELECT count(*) FROM llm_traces) AS calls,
+        (SELECT count(*) FROM llm_traces
+          WHERE created_at > now() - interval '7 days') AS week_calls,
+        (SELECT coalesce(sum(cost_usd), 0) FROM llm_traces
+          WHERE created_at > now() - interval '7 days') AS week_usd,
+        (SELECT string_agg(DISTINCT response_model, ', ') FROM llm_traces
+          WHERE created_at > now() - interval '7 days'
+            AND response IS NOT NULL AND cost_usd IS NULL) AS unpriced`;
     const bytes = Number(row.bytes);
-    const usage = `${Math.round(bytes / 1024 ** 2)} MB of 1 GB (${Math.round(
+    const storage = `${Math.round(bytes / 1024 ** 2)} MB of 1 GB (${Math.round(
       (bytes / STORAGE_LIMIT_BYTES) * 100,
-    )}%), ${Number(row.calls).toLocaleString('en-US')} LLM calls`;
-    return bytes < STORAGE_LIMIT_BYTES * STORAGE_WARN_RATIO
-      ? `LLM trace log: ${usage}.`
-      : `LLM trace log is nearly full: ${usage}. New traces stop saving at 1 GB; delete old chat traces or upgrade the Neon plan.`;
+    )}%), ${count(row.calls, 'LLM call')}`;
+    const lines = [
+      bytes < STORAGE_LIMIT_BYTES * STORAGE_WARN_RATIO
+        ? `LLM trace log: ${storage}.`
+        : `LLM trace log is nearly full: ${storage}. New traces stop saving at 1 GB; delete old chat traces or upgrade the Neon plan.`,
+      `AI spend in the last 7 days: $${Number(row.week_usd).toFixed(2)} over ${count(row.week_calls, 'call')}.`,
+    ];
+    if (row.unpriced) {
+      lines.push(
+        `No price on file for ${row.unpriced as string}, so this week's spend is undercounted: add it to api/_lib/pricing.ts.`,
+      );
+    }
+    return lines.join(' ');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return `LLM trace log: couldn't check its size (${message}).`;
+    return `LLM trace log: couldn't check it (${message}).`;
   }
 }
 

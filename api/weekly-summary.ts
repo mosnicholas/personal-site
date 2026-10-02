@@ -6,7 +6,7 @@ import {
   generateWeeklySummary,
   WEEKLY_TEXT_BUDGET_CHARS,
 } from './_lib/summary.js';
-import { describeTraceStorage } from './_lib/traces.js';
+import { describeTraceLog } from './_lib/traces.js';
 
 /**
  * Weekly Reading Summary Cron Handler
@@ -115,7 +115,7 @@ export default {
             fromName: 'Weekly Reading',
             subject: summary.subject,
             html: summary.html,
-            footer: await describeTraceStorage(),
+            footer: await describeTraceLog(),
           });
           emailSent = true;
           console.log('Email sent successfully');

@@ -125,7 +125,7 @@ GROUP BY 1, 2 ORDER BY usd DESC NULLS LAST;
 
 Neon's free plan has 1 GB of storage and suspends the database when idle; the first write after a few idle minutes takes about half a second longer. Chat traces include what visitors typed (never their IP).
 
-Neon doesn't warn before the 1 GB fills up, so the weekly email ends with a line saying how full the log is, which turns into a warning at 80%. Measured sizes: about 3 KB per tagged document, 6 KB per chat message, and 25 KB a week for the rebalance and summary together. If it does fill, new traces stop saving and everything else keeps working; delete old chat traces (`DELETE FROM llm_traces WHERE kind = 'chat' AND created_at < now() - interval '90 days'`) or move to a paid plan.
+Neon doesn't warn before the 1 GB fills up, so the weekly email ends with a line saying how full the database is (all databases in the project, which is what Neon counts), which turns into a warning at 80%. The same line gives the week's AI spend, and names any model that answered without a price in `api/_lib/pricing.ts` (a new model, or a fallback), since its calls would otherwise cost $0 in the log. Measured sizes: about 3 KB per tagged document, 6 KB per chat message, and 25 KB a week for the rebalance and summary together. If it does fill, new traces stop saving and everything else keeps working; delete old chat traces (`DELETE FROM llm_traces WHERE kind = 'chat' AND created_at < now() - interval '90 days'`) or move to a paid plan.
 
 ## Email setup (Resend + nimo.fyi)
 
