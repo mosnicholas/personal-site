@@ -12,7 +12,8 @@ Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Three parts:
 - **Vite 8** for dev server and build (migrated from the deprecated Create React App)
 - **Vercel** for hosting; `/api/*.ts` are Vercel Functions
 - **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
-- **Anthropic SDK**: `claude-haiku-4-5` for terminal chat, `claude-opus-5-5` for the weekly summary; **OpenRouter** (Gemini Flash) for reading tags; **Resend** for email
+- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and article tagging, `claude-opus-5-5` for the weekly summary
+- **Resend** for email (personal account; sender `reader@nimo.fyi`, override with `EMAIL_FROM`)
 - ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
 
 ## Project Structure
@@ -39,12 +40,13 @@ personal-site/
 │   ├── weekly-summary.ts      # Sunday 9am UTC cron (see vercel.json)
 │   ├── tsconfig.json          # Node/ESM config; Vercel also uses it to compile /api
 │   └── _lib/                  # Helpers; underscore keeps Vercel from deploying them as functions
+│       ├── anthropic.ts       # Shared Anthropic client (checks ANTHROPIC_API_KEY)
 │       ├── auth.ts            # Constant-time secret comparison
 │       ├── email.ts           # Resend client
-│       ├── openrouter.ts      # OpenRouter client - article tagging
 │       ├── rate-limit.ts      # In-memory per-instance rate limiter for /api/chat
 │       ├── readwise.ts        # Readwise Reader v3 client
-│       └── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming)
+│       ├── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming)
+│       └── tagging.ts         # Article tags via Claude Haiku 4.5 (structured outputs)
 ├── vite.config.ts
 ├── eslint.config.js
 ├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
@@ -106,7 +108,7 @@ npm run format
 - **Glitch**: `@keyframes glitch`, `glitchTop`, `glitchBottom` in `src/index.css`
 - **Colors**: `src/index.css` (background `#000`, text `#fff`, subtitle `#9ca3af`, terminal `#00ff00`)
 - **Terminal assistant persona**: `SYSTEM_PROMPT` in `api/chat.ts`
-- **Reading models**: `TAGGING_MODEL` in `api/_lib/openrouter.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts`
+- **Reading models**: `TAGGING_MODEL` in `api/_lib/tagging.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts`
 - **Chat rate limits**: `perIpLimit` / `overallLimit` in `api/chat.ts`
 
 ## Commit Style

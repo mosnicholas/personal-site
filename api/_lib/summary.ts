@@ -2,7 +2,7 @@
  * Weekly reading summary, written by Claude Opus 5.5
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { getAnthropic } from './anthropic.js';
 
 const SUMMARY_MODEL = 'claude-opus-5-5';
 
@@ -61,12 +61,8 @@ ${articleList}
 
 Generate a comprehensive weekly reading summary.`;
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY environment variable is not set');
-  }
-
   // Streaming keeps a long response from hitting HTTP timeouts
-  const stream = new Anthropic().beta.messages.stream({
+  const stream = getAnthropic().beta.messages.stream({
     model: SUMMARY_MODEL,
     max_tokens: 16000,
     output_config: { effort: 'medium' },

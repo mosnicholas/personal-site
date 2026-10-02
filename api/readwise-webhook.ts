@@ -1,6 +1,6 @@
 import { secretsMatch } from './_lib/auth.js';
-import { generateTags } from './_lib/openrouter.js';
 import { fetchArticle, updateDocument } from './_lib/readwise.js';
+import { generateTags } from './_lib/tagging.js';
 
 /**
  * Readwise Reader Webhook Handler

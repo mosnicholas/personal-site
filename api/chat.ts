@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 
+import { getAnthropic } from './_lib/anthropic.js';
 import { clientIp, createRateLimiter } from './_lib/rate-limit.js';
 
 const MODEL = 'claude-haiku-4-5';
@@ -133,8 +134,6 @@ Check out myjunior.ai or type 'help' for commands.
 
 Remember: Be helpful, be concise, be human. This is nimo's terminal - make it feel alive.`;
 
-let client: Anthropic | undefined;
-
 // Per function instance - see _lib/rate-limit.ts for what that means
 const perIpLimit = createRateLimiter({ limit: 10, windowMs: 60_000 });
 const overallLimit = createRateLimiter({ limit: 200, windowMs: 60 * 60_000 });
@@ -221,8 +220,7 @@ export default {
     }
 
     try {
-      client ??= new Anthropic();
-      const response = await client.messages.create({
+      const response = await getAnthropic().messages.create({
         model: MODEL,
         max_tokens: 1024,
         // Caches the growing conversation once it's long enough to qualify

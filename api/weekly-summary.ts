@@ -115,7 +115,7 @@ export default {
         try {
           const today = new Date().toISOString().split('T')[0];
           await saveDocument({
-            url: `https://nimo.dev/reading-summary/${today}`,
+            url: `https://nimo.fyi/reading-summary/${today}`,
             title: summary.subject,
             html: summary.html,
             should_clean_html: false,

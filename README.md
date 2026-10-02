@@ -16,7 +16,7 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - Answer questions about me in terminal-style
 
 ### Reading Workflows
-- `/api/readwise-webhook` - auto-tags new Readwise Reader documents
+- `/api/readwise-webhook` - auto-tags new Readwise Reader documents with Claude Haiku 4.5
 - `/api/weekly-summary` - weekly cron that emails a Claude Opus 5.5 summary of my reading
 
 ## Tech Stack
@@ -26,8 +26,8 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - **Vite 8** - Dev server and build
 - **Vanilla CSS** - No framework bloat
 - **Vercel Functions** - Backend API (`/api`)
-- **Anthropic Claude** - Haiku 4.5 for terminal chat, Opus 5.5 for reading summaries
-- **OpenRouter (Gemini Flash)** - Reading tags
+- **Anthropic Claude** - Haiku 4.5 for terminal chat and tagging, Opus 5.5 for reading summaries
+- **Resend** - Weekly summary email
 - **Share Tech Mono** - Cool terminal font
 
 ## Quick Start
