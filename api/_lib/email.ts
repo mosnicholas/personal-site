@@ -25,14 +25,15 @@ function getApiKey(): string {
   return apiKey;
 }
 
-// Resend only sends from verified domains. Until nimo.fyi is verified, set
-// EMAIL_FROM to onboarding@resend.dev (it can only send to your Resend signup address).
-const DEFAULT_FROM = 'Weekly Reading <reader@nimo.fyi>';
+// nimo.fyi is verified in Resend
+const FROM = 'Weekly Reading <reader@nimo.fyi>';
 
 function getRecipientEmail(): string {
-  const email = process.env.EMAIL_TO;
+  const email = process.env.WEEKLY_SUMMARY_RECIPIENT_EMAIL;
   if (!email) {
-    throw new Error('EMAIL_TO environment variable is not set');
+    throw new Error(
+      'WEEKLY_SUMMARY_RECIPIENT_EMAIL environment variable is not set',
+    );
   }
   return email;
 }
@@ -48,7 +49,7 @@ export async function sendWeeklySummary(
   const recipientEmail = getRecipientEmail();
 
   const payload: SendEmailPayload = {
-    from: process.env.EMAIL_FROM || DEFAULT_FROM,
+    from: FROM,
     to: recipientEmail,
     subject,
     html,

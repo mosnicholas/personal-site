@@ -1,4 +1,4 @@
-import { secretsMatch } from './_lib/auth.js';
+import { rejectUnauthorizedCron } from './_lib/auth.js';
 import { sendWeeklySummary } from './_lib/email.js';
 import { fetchArticles, saveDocument } from './_lib/readwise.js';
 import { generateWeeklySummary } from './_lib/summary.js';
@@ -29,22 +29,8 @@ export default {
       return errorResponse('Method not allowed', 405);
     }
 
-    // Fail closed: without a secret anyone could trigger LLM calls and emails.
-    // Local `vercel dev` runs are the only exception.
-    const cronSecret = process.env.CRON_SECRET;
-    if (!cronSecret && process.env.VERCEL_ENV !== 'development') {
-      console.error('CRON_SECRET is not set - rejecting request');
-      return errorResponse('Cron not configured', 500);
-    }
-    if (
-      cronSecret &&
-      !secretsMatch(
-        request.headers.get('authorization'),
-        `Bearer ${cronSecret}`,
-      )
-    ) {
-      return errorResponse('Unauthorized', 401);
-    }
+    const unauthorized = rejectUnauthorizedCron(request);
+    if (unauthorized) return unauthorized;
 
     try {
       const params = new URL(request.url).searchParams;
@@ -58,7 +44,7 @@ export default {
       const updatedAfter = new Date();
       updatedAfter.setDate(updatedAfter.getDate() - daysBack);
 
-      const articles = await fetchArticles(updatedAfter);
+      const articles = await fetchArticles({ updatedAfter });
       console.log(`Found ${articles.length} documents in the time range`);
 
       // Filter to articles with meaningful content

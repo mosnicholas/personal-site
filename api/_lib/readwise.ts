@@ -31,6 +31,17 @@ export interface Article {
   reading_progress: number;
 }
 
+export interface Tag {
+  key: string;
+  name: string;
+}
+
+interface Page<T> {
+  count: number;
+  nextPageCursor: string | null;
+  results: T[];
+}
+
 export interface ArticleListResponse {
   count: number;
   nextPageCursor: string | null;
@@ -116,38 +127,70 @@ async function makeRequest<T>(
 }
 
 /**
- * Fetch articles from Readwise Reader
- * @param updatedAfter - Only return articles updated after this date
- * @param location - Filter by location (new, later, archive, feed)
+ * Follow `nextPageCursor` until every page of a list endpoint is loaded
  */
-export async function fetchArticles(
-  updatedAfter?: Date,
-  location?: Location,
-): Promise<Article[]> {
-  const articles: Article[] = [];
+async function fetchAllPages<T>(
+  path: string,
+  params: URLSearchParams = new URLSearchParams(),
+): Promise<T[]> {
+  const items: T[] = [];
   let nextPageCursor: string | null = null;
 
   do {
-    const params = new URLSearchParams();
-    if (updatedAfter) {
-      params.set('updatedAfter', updatedAfter.toISOString());
-    }
-    if (location) {
-      params.set('location', location);
-    }
     if (nextPageCursor) {
       params.set('pageCursor', nextPageCursor);
     }
-
     const queryString = params.toString();
-    const endpoint = `/list/${queryString ? `?${queryString}` : ''}`;
-
-    const response = await makeRequest<ArticleListResponse>(endpoint);
-    articles.push(...response.results);
+    const response = await makeRequest<Page<T>>(
+      `${path}${queryString ? `?${queryString}` : ''}`,
+    );
+    items.push(...response.results);
     nextPageCursor = response.nextPageCursor;
   } while (nextPageCursor);
 
-  return articles;
+  return items;
+}
+
+/**
+ * Fetch articles from Readwise Reader
+ * @param updatedAfter - Only return articles updated after this date
+ * @param location - Filter by location (new, later, archive, feed)
+ * @param tag - Only return articles with this tag key; `''` returns untagged ones
+ */
+export async function fetchArticles({
+  updatedAfter,
+  location,
+  tag,
+}: { updatedAfter?: Date; location?: Location; tag?: string } = {}): Promise<
+  Article[]
+> {
+  const params = new URLSearchParams();
+  if (updatedAfter) {
+    params.set('updatedAfter', updatedAfter.toISOString());
+  }
+  if (location) {
+    params.set('location', location);
+  }
+  if (tag !== undefined) {
+    params.set('tag', tag);
+  }
+  return fetchAllPages<Article>('/list/', params);
+}
+
+/**
+ * Every tag in the library
+ */
+export async function fetchTags(): Promise<Tag[]> {
+  return fetchAllPages<Tag>('/tags/');
+}
+
+/**
+ * The tag names on an article (its `tags` field is keyed by tag key)
+ */
+export function articleTagNames(article: Pick<Article, 'tags'>): string[] {
+  return Object.entries(article.tags ?? {}).map(
+    ([key, tag]) => (tag as { name?: string } | null)?.name ?? key,
+  );
 }
 
 /**
@@ -170,6 +213,32 @@ export async function updateDocument(
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
+}
+
+/**
+ * Replace the tags on many documents, 50 per request (the API's limit)
+ */
+export async function bulkUpdateTags(
+  updates: { id: string; tags: string[] }[],
+): Promise<{ updated: number; failed: string[] }> {
+  let updated = 0;
+  const failed: string[] = [];
+
+  for (let i = 0; i < updates.length; i += 50) {
+    const response = await makeRequest<{
+      results?: { id: string; success: boolean; error?: string }[];
+    }>('/bulk_update/', {
+      method: 'PATCH',
+      body: JSON.stringify({ updates: updates.slice(i, i + 50) }),
+    });
+    // 207 means some items failed; each result says which
+    for (const result of response.results ?? []) {
+      if (result.success) updated += 1;
+      else failed.push(`${result.id}: ${result.error ?? 'unknown error'}`);
+    }
+  }
+
+  return { updated, failed };
 }
 
 /**

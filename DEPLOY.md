@@ -14,13 +14,13 @@ In Vercel project settings, add these for Production (and Preview if you want th
 
 | Variable                  | Used by                       | Where to get it                                       |
 | ------------------------- | ----------------------------- | ----------------------------------------------------- |
-| `ANTHROPIC_API_KEY`       | chat, tagging, weekly summary | https://console.anthropic.com/                        |
+| `ANTHROPIC_API_KEY`       | chat, rebalance, summary      | https://console.anthropic.com/                        |
+| `TYPESAFE_API_KEY`        | tagging (Jev)                 | https://console.typesafe.ai                           |
 | `READWISE_API_KEY`        | webhook + weekly summary      | https://readwise.io/access_token                       |
 | `READWISE_WEBHOOK_SECRET` | `/api/readwise-webhook`       | Readwise generates it (step 5)                        |
 | `RESEND_API_KEY`          | weekly summary email          | Resend → API Keys (see "Email setup" below)           |
-| `EMAIL_TO`                | weekly summary email          | Your inbox                                            |
-| `EMAIL_FROM` (optional)   | weekly summary email          | Defaults to `Weekly Reading <reader@nimo.fyi>`        |
-| `CRON_SECRET`             | `/api/weekly-summary`         | Make one up: `openssl rand -hex 32 \| pbcopy`          |
+| `WEEKLY_SUMMARY_RECIPIENT_EMAIL` | weekly summary email   | Your inbox (mail comes from `reader@nimo.fyi`)        |
+| `CRON_SECRET`             | both cron jobs                | Make one up: `openssl rand -hex 32 \| pbcopy`          |
 
 The webhook and cron endpoints refuse requests when their secret isn't set. Env var changes only apply to new deployments, so redeploy after adding one.
 
@@ -28,7 +28,7 @@ The webhook and cron endpoints refuse requests when their secret isn't set. Env 
 Push to `main` (or click "Deploy"). Vercel will:
 - Run `npm install` from `package-lock.json`
 - Run `npm run build` (type-checks the frontend **and** the API, then builds)
-- Deploy each file in `/api` as a function and register the weekly cron
+- Deploy each file in `/api` as a function and register the two weekly crons
 
 ### 4. Protect the chat endpoint (free)
 `/api/chat` is public and spends your Anthropic credits, so it has three layers:
@@ -42,7 +42,7 @@ The endpoint has to be live in production first (step 3).
 
 1. Go to https://readwise.io/webhook and add a webhook
 2. URL: `https://nimo.fyi/api/readwise-webhook` (use the apex domain: `www` answers with a redirect, which webhook POSTs don't follow)
-3. Event: `reader.any_document.created` only. Don't add `reader.document.tags_updated`; the handler ignores it anyway
+3. Event: `reader.non_feed_document.created` to tag what you save, or `reader.any_document.created` to also tag every RSS feed item. Don't add `reader.document.tags_updated`; the handler ignores it anyway
 4. Save, copy the secret Readwise shows, add it to Vercel as `READWISE_WEBHOOK_SECRET`, and redeploy
 5. Save any article to Reader. Within a few seconds it should have tags, and Vercel → Logs shows `/api/readwise-webhook`
 
@@ -53,10 +53,22 @@ The endpoint has to be live in production first (step 3).
   curl -H "Authorization: Bearer $CRON_SECRET" \
     "https://<your-domain>/api/weekly-summary?email=false&save=false"
   ```
+- Tag rebalance (also tags anything saved in the last `days` that has no tags; a big number backfills the library, repeat until `incomplete` is false):
+  ```bash
+  curl -H "Authorization: Bearer $CRON_SECRET" \
+    "https://<your-domain>/api/rebalance-tags?days=3650"
+  ```
+
+## Tagging and the knowledge graph
+
+Readwise holds the taxonomy: it's the set of tags in use.
+
+- **On save** (`/api/readwise-webhook`): TypeSafe's Jev asks one yes/no question per tag ("is this a main topic?") and applies tags it's at least 60% sure of, up to 5. If nothing fits, or the main subject has no tag yet, the document also gets `other`. New documents never get new tags.
+- **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate tags and tags the `other` documents, creating a new tag once a theme shows up in at least two of them. Everything is applied straight away; the plan is in the function logs.
 
 ## Email setup (Resend + nimo.fyi)
 
-Use a personal Resend account (free: 3,000 emails/month), not a company team.
+Done: `nimo.fyi` is verified in a personal Resend account (free: 3,000 emails/month), and the summary comes from `reader@nimo.fyi`. The `send` and `rsend` records are Resend's bounce handling, not a sending address. To redo it from scratch:
 
 1. Sign up at https://resend.com, then Domains → Add Domain → `nimo.fyi` (region `us-east-1`)
 2. nimo.fyi's DNS is at Squarespace Domains. In Squarespace → Domains → nimo.fyi → DNS → Custom records, add exactly what Resend shows. The host is just the part before `.nimo.fyi`:
@@ -71,8 +83,6 @@ Use a personal Resend account (free: 3,000 emails/month), not a company team.
    These live on the `send` subdomain, so they don't touch the existing Mailgun MX/SPF records on the root domain.
 3. Click Verify in Resend (usually minutes, can take up to 72 hours)
 4. API Keys → Create, permission "Sending access", domain `nimo.fyi` → set as `RESEND_API_KEY` in Vercel
-
-Until verification finishes, set `EMAIL_FROM` to `Weekly Reading <onboarding@resend.dev>`; Resend only delivers that to your signup address. Remove it once the domain is verified.
 
 ## Local Development
 
@@ -92,8 +102,9 @@ Visit `http://localhost:3000?mode=terminal`.
 personal-site/
 ├── api/
 │   ├── chat.ts              # Terminal chat (Claude Haiku 4.5, rate limited)
-│   ├── readwise-webhook.ts  # Auto-tags new Readwise documents
-│   ├── weekly-summary.ts    # Weekly reading summary cron
+│   ├── readwise-webhook.ts  # Tags new Readwise documents from the taxonomy (Jev)
+│   ├── rebalance-tags.ts    # Weekly taxonomy rebalance cron (Opus 5.5)
+│   ├── weekly-summary.ts    # Weekly reading summary cron (Opus 5.5)
 │   └── _lib/                # Shared helpers (underscore = not deployed as functions)
 ├── src/                     # React app
 ├── index.html               # Vite entry
@@ -121,7 +132,8 @@ Edit `MODEL` in `api/chat.ts` (currently `claude-haiku-4-5`). Model list: https:
 Edit the `SYSTEM_PROMPT` constant in `api/chat.ts`.
 
 ### Change the reading models
-- Tagging: `TAGGING_MODEL` in `api/_lib/tagging.ts`
+- Tagging: `TAG_THRESHOLD` / `MAX_TAGS` in `api/_lib/tagging.ts` (raise the threshold for fewer, surer tags)
+- Rebalance: `PLAN_MODEL` and the taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
 - Weekly summary: `SUMMARY_MODEL` in `api/_lib/summary.ts` (Claude via the Anthropic SDK)
 
-The weekly summary streams a long Opus response and can take a couple of minutes. That fits in Vercel's 300s limit on Hobby with Fluid compute (on by default for new projects; check Settings → Functions if the cron times out).
+The weekly summary and rebalance stream long Opus responses and can take a couple of minutes. That fits in Vercel's 300s limit on Hobby with Fluid compute (on by default for new projects; check Settings → Functions if the cron times out).

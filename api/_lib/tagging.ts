@@ -1,76 +1,91 @@
 /**
- * Article tagging with Claude Haiku 4.5
+ * Article tagging with TypeSafe's Jev, a classifier that returns calibrated
+ * probabilities instead of generated text. Each tag in the taxonomy is one
+ * yes/no question, all answered in a single request.
+ * Docs: https://docs.typesafe.ai/api
  */
 
-import { getAnthropic } from './anthropic.js';
+import { OTHER_TAG } from './taxonomy.js';
 
-const TAGGING_MODEL = 'claude-haiku-4-5';
+const TYPESAFE_API_URL = 'https://api.typesafe.ai/v1/systemone';
+const JEV_MODEL = 'jev-latest';
+// A tag applies when Jev is at least this sure it's a main topic
+const TAG_THRESHOLD = 0.6;
+const MAX_TAGS = 5;
+// Below this, the main subject isn't covered by any tag yet
+const COVERED_THRESHOLD = 0.5;
 
-const SYSTEM_PROMPT = `You are a librarian assistant helping build a searchable knowledge graph. Your task is to analyze articles and generate relevant tags.
-
-Rules for tags:
-- Generate 3-7 tags per article
-- Use #lowercase-with-hyphens format (e.g., #machine-learning, #startup-strategy)
-- Tags should be specific enough to be useful but general enough to group related content
-- Include a mix of: topic tags, domain tags, and format/type tags
-- Avoid overly generic tags like #article or #interesting
-
-Also give "notes": a brief 1-2 sentence summary of why these tags were chosen, and "primary_tag": the most relevant of your tags.`;
-
-// Structured outputs guarantee the reply is JSON in this shape
-const TAG_SCHEMA = {
-  type: 'object',
-  properties: {
-    tags: { type: 'array', items: { type: 'string' } },
-    notes: { type: 'string' },
-    primary_tag: { type: 'string' },
-  },
-  required: ['tags', 'notes', 'primary_tag'],
-  additionalProperties: false,
-};
-
-export interface TagGenerationResult {
-  tags: string[];
-  notes: string;
-  primary_tag: string;
-}
-
-/**
- * Generate tags for an article
- */
-export async function generateTags(article: {
+export interface TaggableDocument {
   title: string;
   author: string | null;
-  summary: string | null;
   url: string;
-}): Promise<TagGenerationResult> {
-  const userPrompt = `Analyze this article and generate appropriate tags:
+  summary: string | null;
+}
 
-Title: ${article.title}
-Author: ${article.author ?? 'Unknown'}
-URL: ${article.url}
-Summary: ${article.summary ?? 'No summary available'}`;
+interface NoulQuestion {
+  type: 'noul';
+  instructions: string | Record<string, unknown>;
+}
 
-  const response = await getAnthropic().messages.create({
-    model: TAGGING_MODEL,
-    max_tokens: 1024,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userPrompt }],
-    output_config: { format: { type: 'json_schema', schema: TAG_SCHEMA } },
+const topic = (tag: string) => tag.replace(/-/g, ' ');
+
+/**
+ * Picks tags for a document from `taxonomy`. Adds `other` when nothing fits
+ * or the document's main subject has no tag yet.
+ */
+export async function classifyDocument(
+  document: TaggableDocument,
+  taxonomy: string[],
+): Promise<string[]> {
+  if (taxonomy.length === 0) return [OTHER_TAG];
+
+  const apiKey = process.env.TYPESAFE_API_KEY;
+  if (!apiKey) {
+    throw new Error('TYPESAFE_API_KEY environment variable is not set');
+  }
+
+  const questions: Record<string, NoulQuestion> = {
+    covered: {
+      type: 'noul',
+      instructions: {
+        topics: taxonomy.map(topic),
+        question: 'Does `topics` include the main subject of `document`?',
+      },
+    },
+  };
+  taxonomy.forEach((tag, i) => {
+    questions[`tag_${i}`] = {
+      type: 'noul',
+      instructions: `Is "${topic(tag)}" one of the main topics of \`document\`, not just a passing mention?`,
+    };
   });
 
-  if (response.stop_reason === 'refusal') {
-    throw new Error('Tagging request was declined');
+  const response = await fetch(TYPESAFE_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ model: JEV_MODEL, state: { document }, questions }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`TypeSafe API error (${response.status}): ${errorText}`);
   }
 
-  const text = response.content
-    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-    .join('');
-  const result = JSON.parse(text) as TagGenerationResult;
-  const tags = result.tags.filter((tag) => tag.trim());
-  if (tags.length === 0) {
-    throw new Error('Response did not include any tags');
-  }
+  const { answers } = (await response.json()) as {
+    answers: Record<string, { noul: number }>;
+  };
 
-  return { ...result, tags };
+  const tags = taxonomy
+    .map((tag, i) => ({ tag, p: answers[`tag_${i}`]?.noul ?? 0 }))
+    .filter(({ p }) => p >= TAG_THRESHOLD)
+    .sort((a, b) => b.p - a.p)
+    .slice(0, MAX_TAGS)
+    .map(({ tag }) => tag);
+
+  if (tags.length === 0 || (answers.covered?.noul ?? 1) < COVERED_THRESHOLD) {
+    tags.push(OTHER_TAG);
+  }
+  return tags;
 }
