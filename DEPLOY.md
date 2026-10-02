@@ -108,7 +108,13 @@ ORDER BY r.created_at, title;
 
 ## LLM trace log (Neon Postgres, free)
 
-Every LLM call (chat, document summaries, tagging, rebalance, glossary, tag briefs, weekly summary, reading synthesis) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare.
+Every LLM call (chat, document summaries, tagging, rebalance, glossary, tag briefs, weekly summary, reading synthesis) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare. Each row also has the token counts the API reported (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`) and `cost_usd`, priced with cache writes and reads at their own rates, so spend adds up directly:
+
+```sql
+SELECT kind, response_model, count(*) AS calls, sum(cost_usd) AS usd
+FROM llm_traces WHERE created_at > now() - interval '7 days'
+GROUP BY 1, 2 ORDER BY usd DESC NULLS LAST;
+```
 
 1. Vercel → your project → Storage → Create Database → Neon → Free plan → connect it to the project. This sets `DATABASE_URL`
 2. Redeploy. The tables (`llm_traces`, `documents`, `tags`, `sync_state`) are created on first use

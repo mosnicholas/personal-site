@@ -7,6 +7,7 @@
  */
 
 import { getSql } from './db.js';
+import { tokenUsage, type Usage } from './pricing.js';
 
 export type TraceKind =
   | 'chat'
@@ -49,9 +50,18 @@ export async function recordTrace(trace: Trace): Promise<void> {
       return;
     }
     const sql = await sqlPromise;
+    // Token counts and cost exactly as the API reported them, as columns
+    const response = trace.response as
+      { model?: string; usage?: Usage } | undefined;
+    const usage = response?.usage
+      ? tokenUsage(response.model ?? trace.model, response.usage)
+      : undefined;
     await sql`
-      INSERT INTO llm_traces
-        (kind, subject_id, model, request, response, result, latency_ms, error, git_sha)
+      INSERT INTO llm_traces (
+        kind, subject_id, model, request, response, result, latency_ms,
+        error, git_sha, response_model, input_tokens, output_tokens,
+        cache_creation_input_tokens, cache_read_input_tokens, cost_usd
+      )
       VALUES (
         ${trace.kind},
         ${trace.subjectId ?? null},
@@ -61,7 +71,13 @@ export async function recordTrace(trace: Trace): Promise<void> {
         ${toJson(trace.result)}::jsonb,
         ${Math.round(trace.latencyMs)},
         ${trace.error ?? null},
-        ${process.env.VERCEL_GIT_COMMIT_SHA ?? null}
+        ${process.env.VERCEL_GIT_COMMIT_SHA ?? null},
+        ${response?.model ?? null},
+        ${usage?.inputTokens ?? null},
+        ${usage?.outputTokens ?? null},
+        ${usage?.cacheCreationInputTokens ?? null},
+        ${usage?.cacheReadInputTokens ?? null},
+        ${usage?.costUsd ?? null}
       )`;
   } catch (error) {
     console.warn('Could not save LLM trace:', error);

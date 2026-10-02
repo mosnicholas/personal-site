@@ -2,10 +2,13 @@
  * Postgres (Neon's free plan via the Vercel Marketplace, which sets
  * DATABASE_URL). Holds the LLM trace log, a mirror of the Readwise library
  * with each saved document's text and our summary, and the tag glossary.
- * Tables are created on first use, so there's no migration step.
+ * Tables are created on first use; MIGRATIONS (below) change existing ones,
+ * once each.
  */
 
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
+
+import { tokenUsage, type Usage } from './pricing.js';
 
 export type Sql = NeonQueryFunction<false, false>;
 
@@ -116,5 +119,72 @@ async function createSchema(sql: Sql): Promise<Sql> {
       value jsonb NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now()
     )`;
+
+  await migrate(sql);
   return sql;
+}
+
+// Changes to existing tables, each run once, in order. The applied version
+// is kept in sync_state; reruns are harmless if two instances race
+const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
+  // 1. Token usage and cost as columns on llm_traces (they were only inside
+  // `response`), filled in for existing rows
+  async (sql) => {
+    await sql`
+      ALTER TABLE llm_traces
+        ADD COLUMN IF NOT EXISTS response_model text,
+        ADD COLUMN IF NOT EXISTS input_tokens integer,
+        ADD COLUMN IF NOT EXISTS output_tokens integer,
+        ADD COLUMN IF NOT EXISTS cache_creation_input_tokens integer,
+        ADD COLUMN IF NOT EXISTS cache_read_input_tokens integer,
+        ADD COLUMN IF NOT EXISTS cost_usd numeric(12, 6)`;
+    const rows = await sql`
+      SELECT id, response->>'model' AS model, response->'usage' AS usage
+      FROM llm_traces
+      WHERE response ? 'usage' AND input_tokens IS NULL`;
+    const updates = rows.map((row) => {
+      const usage = tokenUsage(
+        (row.model as string | null) ?? '',
+        row.usage as Usage,
+      );
+      return {
+        id: String(row.id),
+        response_model: row.model,
+        input_tokens: usage.inputTokens,
+        output_tokens: usage.outputTokens,
+        cache_creation_input_tokens: usage.cacheCreationInputTokens,
+        cache_read_input_tokens: usage.cacheReadInputTokens,
+        cost_usd: usage.costUsd ?? null,
+      };
+    });
+    for (let i = 0; i < updates.length; i += 500) {
+      await sql`
+        UPDATE llm_traces t SET
+          response_model = r.response_model,
+          input_tokens = r.input_tokens,
+          output_tokens = r.output_tokens,
+          cache_creation_input_tokens = r.cache_creation_input_tokens,
+          cache_read_input_tokens = r.cache_read_input_tokens,
+          cost_usd = r.cost_usd
+        FROM jsonb_to_recordset(${JSON.stringify(updates.slice(i, i + 500))}::jsonb)
+          AS r(id bigint, response_model text, input_tokens integer,
+            output_tokens integer, cache_creation_input_tokens integer,
+            cache_read_input_tokens integer, cost_usd numeric)
+        WHERE t.id = r.id`;
+    }
+  },
+];
+
+async function migrate(sql: Sql): Promise<void> {
+  const [row] = await sql`SELECT value FROM sync_state WHERE name = 'schema'`;
+  const applied = Number(
+    (row?.value as { version?: number } | undefined)?.version ?? 0,
+  );
+  for (let version = applied + 1; version <= MIGRATIONS.length; version += 1) {
+    await MIGRATIONS[version - 1](sql);
+    await sql`
+      INSERT INTO sync_state (name, value, updated_at)
+      VALUES ('schema', ${JSON.stringify({ version })}::jsonb, now())
+      ON CONFLICT (name) DO UPDATE SET value = excluded.value, updated_at = now()`;
+  }
 }

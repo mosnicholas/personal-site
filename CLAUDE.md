@@ -55,6 +55,7 @@ personal-site/
 │       ├── email.ts           # Resend client
 │       ├── glossary.ts        # Opus definitions + clusters, Sonnet tag briefs (`tags` table)
 │       ├── graph.ts           # Queries behind /api/reading-graph
+│       ├── pricing.ts         # Per-model token prices and the cost of a call from its usage
 │       ├── rate-limit.ts      # In-memory per-instance rate limiter for /api/chat
 │       ├── readwise.ts        # Readwise Reader v3 client (list, tags, bulk update)
 │       ├── rebalance.ts       # Weekly rebalance: sweep, Opus plan, bulk rewrite
@@ -101,6 +102,8 @@ personal-site/
 
 ### LLM traces
 - Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `document_summary`, `rebalance`, `tag_glossary`, `tag_brief`, `weekly_summary`, `reading_synthesis`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
+- Token usage as reported by the API is stored in columns: `response_model` (the model that answered), `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `cost_usd` computed at write time from `api/_lib/pricing.ts` (input, 5-minute and 1-hour cache writes, cache reads and output each at their own rate; update the table when prices change or a model is added, or new rows get a null cost)
+- Schema changes to existing tables go in `MIGRATIONS` in `api/_lib/db.ts` (run once each; the applied version is in `sync_state` as `schema`)
 - Rebalance traces also store every applied change (`id`, `title`, `before` → `after` tags), which is the undo log, and `renames`, which later runs build on
 - Neon's free plan stops writes at 1 GB without warning, so the weekly email ends with `describeTraceStorage()` (size, % of 1 GB, call count; a warning from 80%)
 - Tracing never breaks the caller; without `DATABASE_URL` it's skipped. New LLM calls should be traced too
