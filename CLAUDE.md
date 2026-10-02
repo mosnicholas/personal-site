@@ -12,8 +12,7 @@ Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Three parts:
 - **Vite 8** for dev server and build (migrated from the deprecated Create React App)
 - **Vercel** for hosting; `/api/*.ts` are Vercel Functions
 - **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
-- **Anthropic SDK**: `claude-haiku-4-5` for terminal chat, `claude-opus-5-5` for the weekly tag rebalance and summary
-- **TypeSafe Jev** (raw HTTP, `TYPESAFE_API_KEY`) to classify new documents into existing tags
+- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and tagging, `claude-opus-5-5` for the weekly tag rebalance and summary
 - **Resend** for email (personal account, `nimo.fyi` verified; sender `reader@nimo.fyi`, recipient `WEEKLY_SUMMARY_RECIPIENT_EMAIL`)
 - ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
 
@@ -49,7 +48,7 @@ personal-site/
 │       ├── readwise.ts        # Readwise Reader v3 client (list, tags, bulk update)
 │       ├── rebalance.ts       # Weekly rebalance: sweep, Opus plan, bulk rewrite
 │       ├── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming)
-│       ├── tagging.ts         # Jev classifier: one yes/no question per tag
+│       ├── tagging.ts         # Haiku tagger, enum-constrained to existing tags + `other`
 │       └── taxonomy.ts        # `other` tag, tag normalization, cached tag list
 ├── vite.config.ts
 ├── eslint.config.js
@@ -73,7 +72,8 @@ personal-site/
 
 ### Tag taxonomy (knowledge graph)
 - Readwise is the source of truth: the taxonomy is the set of tags in use, normalized to lowercase kebab-case
-- New documents only get existing tags. Jev answers one Noul per tag ("is this a main topic?"); tags at >= 0.6 apply, max 5. If none pass, or a separate "does the taxonomy cover the main subject?" Noul is < 0.5, the document also gets `other`
+- New documents only get existing tags: Haiku 4.5 picks up to 5 main-topic tags, and the structured-output schema's `enum` is the current tags plus `other`, so it can't invent one. `other` means nothing fits or the main subject has no tag yet
+- Decision models (TypeSafe Jev, OpenAI's Decisions API) were considered for the save-time step; revisit once a few weeks of Haiku-assigned tags exist to evaluate them against
 - Weekly, Opus 5.5 returns a structured plan (`merges`, `other_documents`); code validates it (no merging into/out of `other`, only known tags and documents) and rewrites tags with Readwise's bulk update. New tags only appear here, once a theme covers 2+ documents
 - Classifier only sees tag names, so names must be self-explanatory
 
@@ -119,7 +119,7 @@ npm run format
 - **Glitch**: `@keyframes glitch`, `glitchTop`, `glitchBottom` in `src/index.css`
 - **Colors**: `src/index.css` (background `#000`, text `#fff`, subtitle `#9ca3af`, terminal `#00ff00`)
 - **Terminal assistant persona**: `SYSTEM_PROMPT` in `api/chat.ts`
-- **Tagging**: `TAG_THRESHOLD` / `MAX_TAGS` in `api/_lib/tagging.ts`; taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
+- **Tagging**: `MAX_TAGS` and rules in `SYSTEM_PROMPT` in `api/_lib/tagging.ts`; taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
 - **Reading models**: `PLAN_MODEL` in `api/_lib/rebalance.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts`
 - **Chat rate limits**: `perIpLimit` / `overallLimit` in `api/chat.ts`
 

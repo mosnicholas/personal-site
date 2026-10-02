@@ -1,19 +1,18 @@
 /**
- * Article tagging with TypeSafe's Jev, a classifier that returns calibrated
- * probabilities instead of generated text. Each tag in the taxonomy is one
- * yes/no question, all answered in a single request.
- * Docs: https://docs.typesafe.ai/api
+ * Article tagging with Claude Haiku 4.5, limited to the existing taxonomy:
+ * structured outputs make the current tags and `other` the only values the
+ * model can return, so it can't invent tags.
  */
 
+import { getAnthropic } from './anthropic.js';
 import { OTHER_TAG } from './taxonomy.js';
 
-const TYPESAFE_API_URL = 'https://api.typesafe.ai/v1/systemone';
-const JEV_MODEL = 'jev-latest';
-// A tag applies when Jev is at least this sure it's a main topic
-const TAG_THRESHOLD = 0.6;
+const TAGGING_MODEL = 'claude-haiku-4-5';
 const MAX_TAGS = 5;
-// Below this, the main subject isn't covered by any tag yet
-const COVERED_THRESHOLD = 0.5;
+
+const SYSTEM_PROMPT = `You tag documents in a personal reading library. From \`allowed_tags\`, pick the tags that name a main topic of the document, not something it only mentions in passing. Use at most ${MAX_TAGS}, most relevant first.
+
+Also add \`other\` when the document's main subject isn't covered by any allowed tag, even if some tags apply. If none apply, return only \`other\`.`;
 
 export interface TaggableDocument {
   title: string;
@@ -22,16 +21,9 @@ export interface TaggableDocument {
   summary: string | null;
 }
 
-interface NoulQuestion {
-  type: 'noul';
-  instructions: string | Record<string, unknown>;
-}
-
-const topic = (tag: string) => tag.replace(/-/g, ' ');
-
 /**
- * Picks tags for a document from `taxonomy`. Adds `other` when nothing fits
- * or the document's main subject has no tag yet.
+ * Picks tags for a document from `taxonomy`. Includes `other` when nothing
+ * fits or the document's main subject has no tag yet.
  */
 export async function classifyDocument(
   document: TaggableDocument,
@@ -39,53 +31,47 @@ export async function classifyDocument(
 ): Promise<string[]> {
   if (taxonomy.length === 0) return [OTHER_TAG];
 
-  const apiKey = process.env.TYPESAFE_API_KEY;
-  if (!apiKey) {
-    throw new Error('TYPESAFE_API_KEY environment variable is not set');
-  }
-
-  const questions: Record<string, NoulQuestion> = {
-    covered: {
-      type: 'noul',
-      instructions: {
-        topics: taxonomy.map(topic),
-        question: 'Does `topics` include the main subject of `document`?',
+  const response = await getAnthropic().messages.create({
+    model: TAGGING_MODEL,
+    max_tokens: 1024,
+    system: SYSTEM_PROMPT,
+    messages: [
+      {
+        role: 'user',
+        content: JSON.stringify({ allowed_tags: taxonomy, document }, null, 2),
+      },
+    ],
+    output_config: {
+      format: {
+        type: 'json_schema',
+        schema: {
+          type: 'object',
+          properties: {
+            tags: {
+              type: 'array',
+              items: { type: 'string', enum: [...taxonomy, OTHER_TAG] },
+            },
+          },
+          required: ['tags'],
+          additionalProperties: false,
+        },
       },
     },
-  };
-  taxonomy.forEach((tag, i) => {
-    questions[`tag_${i}`] = {
-      type: 'noul',
-      instructions: `Is "${topic(tag)}" one of the main topics of \`document\`, not just a passing mention?`,
-    };
   });
 
-  const response = await fetch(TYPESAFE_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ model: JEV_MODEL, state: { document }, questions }),
-  });
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`TypeSafe API error (${response.status}): ${errorText}`);
+  if (response.stop_reason === 'refusal') {
+    throw new Error('Tagging request was declined');
   }
 
-  const { answers } = (await response.json()) as {
-    answers: Record<string, { noul: number }>;
-  };
+  const text = response.content
+    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    .join('');
+  const { tags } = JSON.parse(text) as { tags: string[] };
 
-  const tags = taxonomy
-    .map((tag, i) => ({ tag, p: answers[`tag_${i}`]?.noul ?? 0 }))
-    .filter(({ p }) => p >= TAG_THRESHOLD)
-    .sort((a, b) => b.p - a.p)
-    .slice(0, MAX_TAGS)
-    .map(({ tag }) => tag);
-
-  if (tags.length === 0 || (answers.covered?.noul ?? 1) < COVERED_THRESHOLD) {
-    tags.push(OTHER_TAG);
-  }
-  return tags;
+  const picked = [...new Set(tags)]
+    .filter((tag) => tag !== OTHER_TAG && taxonomy.includes(tag))
+    .slice(0, MAX_TAGS);
+  return picked.length === 0 || tags.includes(OTHER_TAG)
+    ? [...picked, OTHER_TAG]
+    : picked;
 }

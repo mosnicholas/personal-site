@@ -14,8 +14,7 @@ In Vercel project settings, add these for Production (and Preview if you want th
 
 | Variable                  | Used by                       | Where to get it                                       |
 | ------------------------- | ----------------------------- | ----------------------------------------------------- |
-| `ANTHROPIC_API_KEY`       | chat, rebalance, summary      | https://console.anthropic.com/                        |
-| `TYPESAFE_API_KEY`        | tagging (Jev)                 | https://console.typesafe.ai                           |
+| `ANTHROPIC_API_KEY`       | chat, tagging, rebalance, summary | https://console.anthropic.com/                    |
 | `READWISE_API_KEY`        | webhook + weekly summary      | https://readwise.io/access_token                       |
 | `READWISE_WEBHOOK_SECRET` | `/api/readwise-webhook`       | Readwise generates it (step 5)                        |
 | `RESEND_API_KEY`          | weekly summary email          | Resend → API Keys (see "Email setup" below)           |
@@ -63,7 +62,7 @@ The endpoint has to be live in production first (step 3).
 
 Readwise holds the taxonomy: it's the set of tags in use.
 
-- **On save** (`/api/readwise-webhook`): TypeSafe's Jev asks one yes/no question per tag ("is this a main topic?") and applies tags it's at least 60% sure of, up to 5. If nothing fits, or the main subject has no tag yet, the document also gets `other`. New documents never get new tags.
+- **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 picks up to 5 tags that name a main topic. Structured outputs restrict it to your existing tags plus `other`, so it can't invent tags. If nothing fits, or the main subject has no tag yet, the document gets `other`.
 - **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate tags and tags the `other` documents, creating a new tag once a theme shows up in at least two of them. Everything is applied straight away; the plan is in the function logs.
 
 ## Email setup (Resend + nimo.fyi)
@@ -102,7 +101,7 @@ Visit `http://localhost:3000?mode=terminal`.
 personal-site/
 ├── api/
 │   ├── chat.ts              # Terminal chat (Claude Haiku 4.5, rate limited)
-│   ├── readwise-webhook.ts  # Tags new Readwise documents from the taxonomy (Jev)
+│   ├── readwise-webhook.ts  # Tags new Readwise documents from the taxonomy (Haiku 4.5)
 │   ├── rebalance-tags.ts    # Weekly taxonomy rebalance cron (Opus 5.5)
 │   ├── weekly-summary.ts    # Weekly reading summary cron (Opus 5.5)
 │   └── _lib/                # Shared helpers (underscore = not deployed as functions)
@@ -132,7 +131,7 @@ Edit `MODEL` in `api/chat.ts` (currently `claude-haiku-4-5`). Model list: https:
 Edit the `SYSTEM_PROMPT` constant in `api/chat.ts`.
 
 ### Change the reading models
-- Tagging: `TAG_THRESHOLD` / `MAX_TAGS` in `api/_lib/tagging.ts` (raise the threshold for fewer, surer tags)
+- Tagging: `TAGGING_MODEL`, `MAX_TAGS`, and the tagging rules in `SYSTEM_PROMPT` in `api/_lib/tagging.ts`
 - Rebalance: `PLAN_MODEL` and the taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
 - Weekly summary: `SUMMARY_MODEL` in `api/_lib/summary.ts` (Claude via the Anthropic SDK)
 
