@@ -5,14 +5,14 @@ Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Three parts:
 
 1. **Landing page** - "nicholas moschopoulos" scrambles in, becomes a glitching "nimo", and the tagline streams in like an LLM response.
 2. **Terminal mode** (`?mode=terminal`, or press `~`/`t` on the landing page) - retro boot sequence, then a chat with a Claude-powered assistant about nimo.
-3. **Reading workflows** (migrated from n8n) - a Readwise webhook that tags new documents from a tag taxonomy, a weekly cron that rebalances the taxonomy, and a weekly cron that emails an AI summary of the week's reading.
+3. **Reading workflows** (migrated from n8n) - a Readwise webhook that tags new documents from a tag taxonomy, a weekly cron that rebalances the taxonomy, a weekly cron that emails an AI summary of the week's reading, and a monthly cron that emails a longer synthesis.
 
 ## Tech Stack
 - **React 19.3** + **TypeScript 6.0** (strict), vanilla CSS
 - **Vite 8** for dev server and build (migrated from the deprecated Create React App)
 - **Vercel** for hosting; `/api/*.ts` are Vercel Functions
 - **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
-- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and tagging, `claude-opus-5-5` for the weekly tag rebalance and summary
+- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and tagging, `claude-opus-5-5` for the weekly tag rebalance and summary and the monthly synthesis
 - **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log
 - **Resend** for email (personal account, `nimo.fyi` verified; sender `reader@nimo.fyi`, recipient `WEEKLY_SUMMARY_RECIPIENT_EMAIL`)
 - ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
@@ -40,6 +40,7 @@ personal-site/
 │   ├── readwise-webhook.ts    # Tags new Readwise Reader docs from the taxonomy
 │   ├── rebalance-tags.ts      # Sunday 7am UTC cron: rebalance the taxonomy
 │   ├── weekly-summary.ts      # Sunday 9am UTC cron: email the reading summary
+│   ├── reading-synthesis.ts   # 1st of the month 10am UTC cron: email a synthesis (?days= for one-offs)
 │   ├── tsconfig.json          # Node/ESM config; Vercel also uses it to compile /api
 │   └── _lib/                  # Helpers; underscore keeps Vercel from deploying them as functions
 │       ├── anthropic.ts       # Shared Anthropic client (checks ANTHROPIC_API_KEY)
@@ -48,7 +49,8 @@ personal-site/
 │       ├── rate-limit.ts      # In-memory per-instance rate limiter for /api/chat
 │       ├── readwise.ts        # Readwise Reader v3 client (list, tags, bulk update)
 │       ├── rebalance.ts       # Weekly rebalance: sweep, Opus plan, bulk rewrite
-│       ├── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming)
+│       ├── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming); parses SUBJECT + HTML
+│       ├── synthesis.ts       # Monthly/one-off synthesis prompt and request (Opus 5.5)
 │       ├── tagging.ts         # Haiku tagger: reuses existing tags, creates new ones when needed
 │       ├── taxonomy.ts        # `other` tag, tag normalization, cached tag list
 │       └── traces.ts          # Saves every LLM call to Postgres (`llm_traces`)
@@ -76,11 +78,12 @@ personal-site/
 - Readwise is the source of truth: the taxonomy is the set of tags in use, normalized to lowercase kebab-case
 - The taxonomy is still being created, so the save-time tagger (Haiku 4.5) may create tags: it's shown the existing tags, told to reuse them, and creates one only when none covers a main topic. `other` is for documents it can't place. Don't swap in a closed-set classifier (decision models like Jev) while tags are still being created
 - Weekly, Opus 5.5 returns a structured plan (`merges`, `other_documents`); code validates it (no merging into/out of `other`, only known tags and documents) and rewrites tags with Readwise's bulk update
+- Earlier runs' merges (`loadAppliedRenames()`, read from rebalance traces, newest wins) are passed to Opus as `earlier_merges`, applied to returning retired tags, and used to resolve plan targets, so a plan can't reverse an earlier merge
 - Classifier only sees tag names, so names must be self-explanatory
 
 ### LLM traces
-- Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `rebalance`, `weekly_summary`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
-- Rebalance traces also store every applied change (`before` → `after` tags per document), which is the undo log
+- Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `rebalance`, `weekly_summary`, `reading_synthesis`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
+- Rebalance traces also store every applied change (`id`, `title`, `before` → `after` tags), which is the undo log, and `renames`, which later runs build on
 - Neon's free plan stops writes at 1 GB without warning, so the weekly email ends with `describeTraceStorage()` (size, % of 1 GB, call count; a warning from 80%)
 - Tracing never breaks the caller; without `DATABASE_URL` it's skipped. New LLM calls should be traced too
 
@@ -90,6 +93,7 @@ personal-site/
 - `readwise-webhook.ts`: only handles `*document.created` events to avoid loops (anything else gets a 200 `skipped`, no secret needed); acts only with a matching `READWISE_WEBHOOK_SECRET` (Readwise sends it as `secret` in the body), and answers 200 without acting while it's unset, because Readwise won't create the webhook (and reveal the secret) until its endpoint test passes; tags the document via `classifyDocument` against the current taxonomy and replaces its tags (the user never tags by hand)
 - `rebalance-tags.ts`: same cron auth; `?days=` (default 8) sets how far back to look for untagged documents, so a big value backfills. Applies changes directly, no review step. Works within a ~220s time budget and reports `incomplete` if it stopped early; it's idempotent, so the next run continues. The sweep lists each location a page at a time (library first, then the feed, which can hold thousands of items against a 20 requests/min limit), tags as it goes, and skips the Opus plan until nothing is left untagged
 - `weekly-summary.ts`: requires `Authorization: Bearer $CRON_SECRET` (Vercel cron sends this; `rejectUnauthorizedCron` in `_lib/auth.ts`); `?days=` (1-31), `?email=false`, `?save=false` for manual runs. It summarizes documents saved or opened in the window, not everything updated: rewriting tags can bump `updated_at` on old documents. The summary is written by Claude Opus 5.5 at `medium` effort with server-side refusal fallbacks (`fallbacks: "default"`)
+- `reading-synthesis.ts`: same cron auth; `?days=` (default 31, max 183), `?email=false`, `?dry_run=true` (counts and approximate input tokens, no model call). Covers documents saved to the library (`new`, `later`, `shortlist`, `archive`) in the window, with their highlights; one Opus 5.5 call at `medium` effort writes themes, change over time, meta observations, what to read, and questions. It must finish within 300s, so the prompt asks for ~3,000 words
 
 ## Development
 

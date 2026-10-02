@@ -28,7 +28,7 @@ The cron endpoints refuse requests when `CRON_SECRET` isn't set. Until `READWISE
 Push to `main` (or click "Deploy"). Vercel will:
 - Run `npm install` from `package-lock.json`
 - Run `npm run build` (type-checks the frontend **and** the API, then builds)
-- Deploy each file in `/api` as a function and register the two weekly crons
+- Deploy each file in `/api` as a function and register the crons (two weekly, one monthly)
 
 ### 4. Protect the chat endpoint (free)
 `/api/chat` is public and spends your Anthropic credits, so it has three layers:
@@ -53,6 +53,11 @@ The endpoint has to be live in production first (step 3).
   curl -H "Authorization: Bearer $CRON_SECRET" \
     "https://<your-domain>/api/weekly-summary?email=false&save=false"
   ```
+- Reading synthesis over the last quarter: `dry_run=true` shows how many documents it would cover and roughly how many input tokens, without calling the model; drop it to generate and email
+  ```bash
+  curl -H "Authorization: Bearer $CRON_SECRET" \
+    "https://<your-domain>/api/reading-synthesis?days=92&dry_run=true"
+  ```
 - Tag rebalance (also tags anything saved in the last `days` that has no tags; a big number backfills the library). Each run tags a few hundred documents and skips the Opus cleanup until nothing is left untagged, so repeat until `incomplete` is false:
   ```bash
   curl -H "Authorization: Bearer $CRON_SECRET" \
@@ -64,11 +69,28 @@ The endpoint has to be live in production first (step 3).
 Readwise holds the taxonomy: it's the set of tags in use.
 
 - **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 gives the document up to 5 tags for its main topics. It's shown the existing tags and told to reuse them, and creates a new tag only when none fits, since the taxonomy is still growing. Documents it can't place get `other`.
-- **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate and overlapping tags and sorts out `other`. Everything is applied straight away; the plan and every before → after change are saved in the trace log.
+- **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate and overlapping tags and sorts out `other`. Everything is applied straight away; the plan and every before → after change (with document titles) are saved in the trace log.
+- **Merges stick:** each run reads earlier runs' merges from the trace log. They're shown to Opus, a retired tag that comes back is folded into its replacement without asking, and a plan can't merge a tag back into one it replaced (the first backfill flipped `ux-design` and `user-experience` between two runs).
+
+To see every change a rebalance made, in the Neon SQL editor:
+
+```sql
+SELECT r.created_at::date AS run,
+       c->>'title' AS title,
+       'https://read.readwise.io/read/' || (c->>'id') AS link,
+       c->'before' AS before, c->'after' AS after
+FROM llm_traces r, jsonb_array_elements(r.result->'changes') c
+WHERE r.kind = 'rebalance'
+ORDER BY r.created_at, title;
+```
+
+## Reading synthesis
+
+`/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 31 days (`?days=` up to 183 for a one-off, e.g. 92 for a quarter). Claude Opus 5.5 gets each document's title, source, date, tags, Readwise summary, how far you got, and your notes and highlights, and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
 
 ## LLM trace log (Neon Postgres, free)
 
-Every LLM call (chat, tagging, rebalance, weekly summary) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare.
+Every LLM call (chat, tagging, rebalance, weekly summary, reading synthesis) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare.
 
 1. Vercel → your project → Storage → Create Database → Neon → Free plan → connect it to the project. This sets `DATABASE_URL`
 2. Redeploy. The table is created on the first trace

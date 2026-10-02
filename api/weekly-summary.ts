@@ -1,5 +1,5 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
-import { sendWeeklySummary } from './_lib/email.js';
+import { sendReadingEmail } from './_lib/email.js';
 import { fetchArticles, saveDocument } from './_lib/readwise.js';
 import { generateWeeklySummary } from './_lib/summary.js';
 import { describeTraceStorage } from './_lib/traces.js';
@@ -101,11 +101,12 @@ export default {
         try {
           // The trace database gives no warning before it fills up, so the
           // email reports how full it is
-          await sendWeeklySummary(
-            summary.html,
-            summary.subject,
-            await describeTraceStorage(),
-          );
+          await sendReadingEmail({
+            fromName: 'Weekly Reading',
+            subject: summary.subject,
+            html: summary.html,
+            footer: await describeTraceStorage(),
+          });
           emailSent = true;
           console.log('Email sent successfully');
         } catch (emailError) {

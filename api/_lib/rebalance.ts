@@ -23,7 +23,7 @@ import {
 } from './readwise.js';
 import { classifyDocument } from './tagging.js';
 import { normalizeTag, OTHER_TAG } from './taxonomy.js';
-import { recordTrace } from './traces.js';
+import { loadAppliedRenames, recordTrace } from './traces.js';
 
 const PLAN_MODEL = 'claude-opus-5-5';
 const CLASSIFY_CONCURRENCY = 5;
@@ -43,7 +43,7 @@ const PLAN_RESERVE_MS = 120_000;
 
 const SYSTEM_PROMPT = `You curate the tag taxonomy of a personal reading library in Readwise Reader. A tagger labels documents as they're saved: it reuses existing tags when they fit and creates new ones otherwise, so each week brings new tags, and some duplicate or overlap existing ones. Tag names must be self-explanatory: lowercase kebab-case, specific enough to be useful, broad enough to group related reading (for example \`machine-learning\`, \`startup-fundraising\`, \`home-cooking\`).
 
-Documents the tagger couldn't place are tagged \`other\`. Each week you get the current tags and the documents in \`other\`, and you return:
+Documents the tagger couldn't place are tagged \`other\`. Each week you get the current tags, the documents in \`other\`, and \`earlier_merges\`, which maps tags retired in earlier weeks to the tag that replaced them. Build on those: don't bring a retired name back, and don't merge a replacement back into a tag it replaced. You return:
 
 1. merges: tags that mean the same thing or nearly so - synonyms, singular and plural, formatting variants, or a tag too narrow to stand on its own next to a broader one. List the tags to retire in \`from\` and the tag they become in \`into\`, which can be an existing tag or a clearer new name. Keep distinct concepts separate even when they're related. Never merge into or out of \`other\`. Leave out tags that are fine as they are.
 2. other_documents: tags for each document in \`other\`, using tag names as they'll be after your merges. Use existing tags where they fit. Create a new tag when it would apply to at least two of these documents or clearly names a lasting interest of this reader. If nothing fits yet, return an empty list for that document; it stays in \`other\` until similar documents arrive.`;
@@ -117,6 +117,7 @@ const today = () => new Date().toISOString().split('T')[0];
 async function planRebalance(
   taxonomy: string[],
   otherDocuments: Article[],
+  earlierRenames: Map<string, string>,
 ): Promise<PlanCall> {
   const request = {
     model: PLAN_MODEL,
@@ -135,6 +136,7 @@ async function planRebalance(
         content: JSON.stringify(
           {
             tags: taxonomy,
+            earlier_merges: Object.fromEntries(earlierRenames),
             other_documents: otherDocuments.map((doc) => ({
               id: doc.id,
               title: doc.title,
@@ -202,9 +204,22 @@ export async function rebalanceTags({
     readwiseTags.map((tag) => normalizeTag(tag.name)),
   ).filter((tag) => tag !== OTHER_TAG);
 
-  // What each document has in Readwise now, and the tags we start from
+  // Merges applied by earlier runs, old name -> new name. Without them a plan
+  // can undo last week's (`ux-design` -> `user-experience` after the reverse)
+  const earlierRenames = await loadAppliedRenames();
+  const settle = (tag: string) => {
+    let name = tag;
+    for (let hops = 0; earlierRenames.has(name) && hops < 10; hops += 1) {
+      name = earlierRenames.get(name)!;
+    }
+    return name;
+  };
+
+  // What each document has in Readwise now, the tags we start from, and its
+  // title for the trace
   const current = new Map<string, string[]>();
   const base = new Map<string, string[]>();
+  const titles = new Map<string, string>();
 
   // 1. Documents the webhook missed, a page at a time so a big backfill gets
   // further each run instead of spending its budget listing
@@ -242,6 +257,7 @@ export async function rebalanceTags({
           if (!tags) return;
           current.set(doc.id, []);
           base.set(doc.id, tags);
+          titles.set(doc.id, doc.title);
           missed.push(doc);
         });
       }
@@ -257,6 +273,7 @@ export async function rebalanceTags({
     otherDocuments.set(doc.id, doc);
     current.set(doc.id, articleTagNames(doc));
     base.set(doc.id, articleTagNames(doc));
+    titles.set(doc.id, doc.title);
   }
   for (const doc of missed) {
     if (base.get(doc.id)?.includes(OTHER_TAG)) otherDocuments.set(doc.id, doc);
@@ -268,25 +285,38 @@ export async function rebalanceTags({
     (taxonomy.length > 0 || otherDocuments.size > 0) &&
     !outOfTime(PLAN_RESERVE_MS)
   ) {
-    planCall = await planRebalance(taxonomy, [...otherDocuments.values()]);
+    planCall = await planRebalance(
+      unique(taxonomy.map(settle)),
+      [...otherDocuments.values()],
+      earlierRenames,
+    );
     console.log('Rebalance plan:', JSON.stringify(planCall.plan));
   }
   const plan = planCall?.plan ?? { merges: [], other_documents: [] };
 
-  // 3. Merges, as old name -> new name
+  // 3. Merges, as old name -> new name. A retired tag that came back (the
+  // tagger can recreate one) goes straight to its replacement
   const renames = new Map<string, string>();
+  for (const name of taxonomy) {
+    if (settle(name) !== name) renames.set(name, settle(name));
+  }
   for (const { from, into } of plan.merges) {
-    const target = normalizeTag(into);
+    // Never target a retired name, so a plan can't reverse an earlier merge
+    const target = settle(normalizeTag(into));
     if (!target || target === OTHER_TAG) continue;
     for (const name of from.map(normalizeTag)) {
-      if (taxonomy.includes(name) && name !== target) renames.set(name, target);
+      if (taxonomy.includes(name) && name !== target && !renames.has(name)) {
+        renames.set(name, target);
+      }
     }
   }
   const rename = (tag: string) => {
     let name = normalizeTag(tag);
     // Follow chains (a -> b -> c), with a cap in case the plan loops
-    for (let hops = 0; renames.has(name) && hops < 10; hops += 1) {
-      name = renames.get(name)!;
+    for (let hops = 0; hops < 10; hops += 1) {
+      const next = renames.get(name) ?? earlierRenames.get(name);
+      if (!next) break;
+      name = next;
     }
     return name;
   };
@@ -302,6 +332,7 @@ export async function rebalanceTags({
     for (const doc of await fetchArticles({ tag: tag.key })) {
       current.set(doc.id, articleTagNames(doc));
       base.set(doc.id, articleTagNames(doc));
+      titles.set(doc.id, doc.title);
     }
   }
 
@@ -345,6 +376,7 @@ export async function rebalanceTags({
         renames: Object.fromEntries(renames),
         changes: updates.map(({ id, tags }) => ({
           id,
+          title: titles.get(id) ?? null,
           before: current.get(id) ?? [],
           after: tags,
         })),

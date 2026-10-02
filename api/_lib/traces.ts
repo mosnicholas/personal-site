@@ -9,7 +9,8 @@
 
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 
-export type TraceKind = 'chat' | 'tagging' | 'rebalance' | 'weekly_summary';
+export type TraceKind =
+  'chat' | 'tagging' | 'rebalance' | 'weekly_summary' | 'reading_synthesis';
 
 export interface Trace {
   kind: TraceKind;
@@ -92,6 +93,44 @@ export async function recordTrace(trace: Trace): Promise<void> {
     ready = undefined;
     console.warn('Could not save LLM trace:', error);
   }
+}
+
+/**
+ * Tag merges applied by earlier rebalance runs, old name -> new name, as they
+ * stand now. Runs are read newest first, so when a later run reversed an
+ * earlier merge (a -> b, then b -> a), the later one wins and the cycle is
+ * dropped.
+ */
+export async function loadAppliedRenames(): Promise<Map<string, string>> {
+  const renames = new Map<string, string>();
+  const sqlPromise = getSql();
+  if (!sqlPromise) return renames;
+  try {
+    const sql = await sqlPromise;
+    const rows = await sql`
+      SELECT result->'renames' AS renames FROM llm_traces
+      WHERE kind = 'rebalance' AND result ? 'renames'
+      ORDER BY created_at DESC`;
+    const resolve = (name: string) => {
+      for (let hops = 0; renames.has(name) && hops < 20; hops += 1) {
+        name = renames.get(name)!;
+      }
+      return name;
+    };
+    for (const row of rows) {
+      for (const [from, into] of Object.entries(
+        (row.renames ?? {}) as Record<string, string>,
+      )) {
+        if (!renames.has(from) && resolve(into) !== from) {
+          renames.set(from, into);
+        }
+      }
+    }
+  } catch (error) {
+    ready = undefined;
+    console.warn('Could not load earlier tag merges:', error);
+  }
+  return renames;
 }
 
 // Neon's free plan blocks writes past 1 GB per project and doesn't warn first

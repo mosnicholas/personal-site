@@ -99,13 +99,30 @@ function parseSummary(
   message: Anthropic.Beta.Messages.BetaMessage,
   articleIds: string[],
 ): WeeklySummaryResult {
+  return {
+    ...parseEmailResponse(
+      message,
+      `Weekly Reading Summary - ${new Date().toLocaleDateString()}`,
+    ),
+    articleIds,
+  };
+}
+
+/**
+ * Splits a response that starts with `SUBJECT: ...` into the subject and an
+ * HTML email body
+ */
+export function parseEmailResponse(
+  message: Anthropic.Beta.Messages.BetaMessage,
+  fallbackSubject: string,
+): { html: string; subject: string } {
   if (message.stop_reason === 'refusal') {
     throw new Error(
-      `Summary request was declined (${message.stop_details?.category ?? 'no category'})`,
+      `Request was declined (${message.stop_details?.category ?? 'no category'})`,
     );
   }
   if (message.stop_reason === 'max_tokens') {
-    console.warn('Summary hit max_tokens - the email may be cut off');
+    console.warn('Response hit max_tokens - the email may be cut off');
   }
 
   const response = message.content
@@ -114,9 +131,7 @@ function parseSummary(
 
   // Extract subject line
   const subjectMatch = response.match(/SUBJECT:\s*(.+?)(?:\n|$)/i);
-  const subject =
-    subjectMatch?.[1]?.trim() ??
-    `Weekly Reading Summary - ${new Date().toLocaleDateString()}`;
+  const subject = subjectMatch?.[1]?.trim() ?? fallbackSubject;
 
   // Extract HTML content (everything after the subject line), minus any code fence
   let html = response
@@ -151,5 +166,5 @@ ${html}
 </html>`;
   }
 
-  return { html, subject, articleIds };
+  return { html, subject };
 }

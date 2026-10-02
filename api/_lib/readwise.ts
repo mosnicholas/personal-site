@@ -172,12 +172,15 @@ interface ArticleFilter {
   location?: Location;
   /** Only articles with this tag key; `''` returns untagged ones */
   tag?: string;
+  /** Only this category, e.g. `highlight` */
+  category?: string;
 }
 
 function articleParams({
   updatedAfter,
   location,
   tag,
+  category,
 }: ArticleFilter): URLSearchParams {
   const params = new URLSearchParams();
   if (updatedAfter) {
@@ -188,6 +191,9 @@ function articleParams({
   }
   if (tag !== undefined) {
     params.set('tag', tag);
+  }
+  if (category) {
+    params.set('category', category);
   }
   return params;
 }

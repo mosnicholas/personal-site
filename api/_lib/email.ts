@@ -26,7 +26,7 @@ function getApiKey(): string {
 }
 
 // nimo.fyi is verified in Resend
-const FROM = 'Weekly Reading <reader@nimo.fyi>';
+const FROM_ADDRESS = 'reader@nimo.fyi';
 
 function getRecipientEmail(): string {
   const email = process.env.WEEKLY_SUMMARY_RECIPIENT_EMAIL;
@@ -46,13 +46,20 @@ const escapeHtml = (text: string) =>
   );
 
 /**
- * Send the weekly reading summary email, with an optional small-print `footer`
+ * Send a reading email (weekly summary, synthesis) to the reader, with an
+ * optional small-print `footer`
  */
-export async function sendWeeklySummary(
-  html: string,
-  subject: string,
-  footer?: string,
-): Promise<{ id: string }> {
+export async function sendReadingEmail({
+  fromName,
+  subject,
+  html,
+  footer,
+}: {
+  fromName: string;
+  subject: string;
+  html: string;
+  footer?: string;
+}): Promise<{ id: string }> {
   const apiKey = getApiKey();
   const recipientEmail = getRecipientEmail();
 
@@ -64,7 +71,7 @@ export async function sendWeeklySummary(
   }
 
   const payload: SendEmailPayload = {
-    from: FROM,
+    from: `${fromName} <${FROM_ADDRESS}>`,
     to: recipientEmail,
     subject,
     html,
