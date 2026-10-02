@@ -6,7 +6,7 @@
 const READWISE_API_BASE = 'https://readwise.io/api/v3';
 const MAX_RATE_LIMIT_RETRIES = 3;
 
-type Location = 'new' | 'later' | 'shortlist' | 'archive' | 'feed';
+export type Location = 'new' | 'later' | 'shortlist' | 'archive' | 'feed';
 
 export interface Article {
   id: string;
@@ -29,6 +29,9 @@ export interface Article {
   notes: string | null;
   parent_id: string | null;
   reading_progress: number;
+  saved_at: string | null;
+  first_opened_at: string | null;
+  last_opened_at: string | null;
 }
 
 export interface Tag {
@@ -127,13 +130,12 @@ async function makeRequest<T>(
 }
 
 /**
- * Follow `nextPageCursor` until every page of a list endpoint is loaded
+ * Follow `nextPageCursor`, yielding one page at a time
  */
-async function fetchAllPages<T>(
+async function* listPages<T>(
   path: string,
   params: URLSearchParams = new URLSearchParams(),
-): Promise<T[]> {
-  const items: T[] = [];
+): AsyncGenerator<T[]> {
   let nextPageCursor: string | null = null;
 
   do {
@@ -141,29 +143,42 @@ async function fetchAllPages<T>(
       params.set('pageCursor', nextPageCursor);
     }
     const queryString = params.toString();
-    const response = await makeRequest<Page<T>>(
+    const response: Page<T> = await makeRequest<Page<T>>(
       `${path}${queryString ? `?${queryString}` : ''}`,
     );
-    items.push(...response.results);
+    yield response.results;
     nextPageCursor = response.nextPageCursor;
   } while (nextPageCursor);
-
-  return items;
 }
 
 /**
- * Fetch articles from Readwise Reader
- * @param updatedAfter - Only return articles updated after this date
- * @param location - Filter by location (new, later, archive, feed)
- * @param tag - Only return articles with this tag key; `''` returns untagged ones
+ * Load every page of a list endpoint
  */
-export async function fetchArticles({
+async function fetchAllPages<T>(
+  path: string,
+  params?: URLSearchParams,
+): Promise<T[]> {
+  const items: T[] = [];
+  for await (const page of listPages<T>(path, params)) {
+    items.push(...page);
+  }
+  return items;
+}
+
+interface ArticleFilter {
+  /** Only articles updated after this date */
+  updatedAfter?: Date;
+  /** Only articles in this location (new, later, shortlist, archive, feed) */
+  location?: Location;
+  /** Only articles with this tag key; `''` returns untagged ones */
+  tag?: string;
+}
+
+function articleParams({
   updatedAfter,
   location,
   tag,
-}: { updatedAfter?: Date; location?: Location; tag?: string } = {}): Promise<
-  Article[]
-> {
+}: ArticleFilter): URLSearchParams {
   const params = new URLSearchParams();
   if (updatedAfter) {
     params.set('updatedAfter', updatedAfter.toISOString());
@@ -174,7 +189,24 @@ export async function fetchArticles({
   if (tag !== undefined) {
     params.set('tag', tag);
   }
-  return fetchAllPages<Article>('/list/', params);
+  return params;
+}
+
+/**
+ * Fetch articles from Readwise Reader
+ */
+export async function fetchArticles(
+  filter: ArticleFilter = {},
+): Promise<Article[]> {
+  return fetchAllPages<Article>('/list/', articleParams(filter));
+}
+
+/**
+ * Like fetchArticles, but a page (up to 100 articles) at a time, so callers
+ * can work through a big list and stop when they run out of time
+ */
+export function articlePages(filter: ArticleFilter = {}) {
+  return listPages<Article>('/list/', articleParams(filter));
 }
 
 /**

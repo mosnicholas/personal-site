@@ -4,6 +4,9 @@
  * 2. Ask Claude Opus 5.5 for a plan: merge duplicate or overlapping tags
  *    (the save-time tagger creates new ones), and tag the documents in `other`
  * 3. Rewrite the tags on every affected document in bulk
+ *
+ * A backfill (a big `sweepDays`) can take several runs: each one tags what it
+ * can in its time budget, and planning waits until nothing is left untagged.
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
@@ -11,10 +14,12 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { getAnthropic } from './anthropic.js';
 import {
   type Article,
+  articlePages,
   articleTagNames,
   bulkUpdateTags,
   fetchArticles,
   fetchTags,
+  type Location,
 } from './readwise.js';
 import { classifyDocument } from './tagging.js';
 import { normalizeTag, OTHER_TAG } from './taxonomy.js';
@@ -22,8 +27,11 @@ import { recordTrace } from './traces.js';
 
 const PLAN_MODEL = 'claude-opus-5-5';
 const CLASSIFY_CONCURRENCY = 5;
-// Stop the sweep early enough to leave time for planning and writing
-const SWEEP_RESERVE_MS = 150_000;
+// Where saved documents live. Asking per location skips RSS feed items at the
+// source; there can be thousands, and listing is rate limited to 20 pages/min
+const LIBRARY_LOCATIONS: Location[] = ['new', 'later', 'shortlist', 'archive'];
+// Stop the sweep early enough to leave time to load `other` and write
+const SWEEP_RESERVE_MS = 60_000;
 // Only start planning if a slow Opus response still fits
 const PLAN_RESERVE_MS = 120_000;
 
@@ -193,43 +201,50 @@ export async function rebalanceTags({
   const current = new Map<string, string[]>();
   const base = new Map<string, string[]>();
 
-  // 1. Documents the webhook missed
+  // 1. Documents the webhook missed, a page at a time so a big backfill gets
+  // further each run instead of spending its budget listing
   const since = new Date(Date.now() - sweepDays * 24 * 60 * 60 * 1000);
-  const missed = (await fetchArticles({ updatedAfter: since, tag: '' })).filter(
-    isLibraryDocument,
-  );
-  let missedDocumentsTagged = 0;
-  for (
-    let i = 0;
-    i < missed.length && !outOfTime(SWEEP_RESERVE_MS);
-    i += CLASSIFY_CONCURRENCY
-  ) {
-    const batch = missed.slice(i, i + CLASSIFY_CONCURRENCY);
-    const results = await Promise.all(
-      batch.map((doc) =>
-        classifyDocument(
-          doc.id,
-          {
-            title: doc.title,
-            author: doc.author,
-            url: doc.url,
-            summary: doc.summary,
-          },
-          taxonomy,
-        ).catch((error) => {
-          console.warn(`Could not classify ${doc.id}:`, error);
-          return undefined;
-        }),
-      ),
-    );
-    batch.forEach((doc, j) => {
-      const tags = results[j];
-      if (!tags) return;
-      current.set(doc.id, []);
-      base.set(doc.id, tags);
-      missedDocumentsTagged += 1;
-    });
+  const missed: Article[] = [];
+  sweep: for (const location of LIBRARY_LOCATIONS) {
+    for await (const page of articlePages({
+      updatedAfter: since,
+      location,
+      tag: '',
+    })) {
+      const docs = page.filter(isLibraryDocument);
+      for (let i = 0; i < docs.length; i += CLASSIFY_CONCURRENCY) {
+        if (outOfTime(SWEEP_RESERVE_MS)) break sweep;
+        const batch = docs.slice(i, i + CLASSIFY_CONCURRENCY);
+        const results = await Promise.all(
+          batch.map((doc) =>
+            classifyDocument(
+              doc.id,
+              {
+                title: doc.title,
+                author: doc.author,
+                url: doc.url,
+                summary: doc.summary,
+              },
+              taxonomy,
+            ).catch((error) => {
+              console.warn(`Could not classify ${doc.id}:`, error);
+              return undefined;
+            }),
+          ),
+        );
+        batch.forEach((doc, j) => {
+          const tags = results[j];
+          if (!tags) return;
+          current.set(doc.id, []);
+          base.set(doc.id, tags);
+          missed.push(doc);
+        });
+      }
+      if (outOfTime(SWEEP_RESERVE_MS)) break sweep;
+    }
   }
+  // Mid-backfill, skip planning: the next run plans once everything is tagged
+  const sweepFinished = !incomplete;
 
   // 2. The `other` bucket, including anything step 1 just put there
   const otherDocuments = new Map<string, Article>();
@@ -244,6 +259,7 @@ export async function rebalanceTags({
 
   let planCall: PlanCall | undefined;
   if (
+    sweepFinished &&
     (taxonomy.length > 0 || otherDocuments.size > 0) &&
     !outOfTime(PLAN_RESERVE_MS)
   ) {
@@ -334,7 +350,7 @@ export async function rebalanceTags({
   }
 
   return {
-    missedDocumentsTagged,
+    missedDocumentsTagged: missed.length,
     merges: [...renames].map(([from, into]) => ({ from: [from], into })),
     otherResolved: otherDocuments.size - otherRemaining,
     otherRemaining,

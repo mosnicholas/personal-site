@@ -38,15 +38,30 @@ function getRecipientEmail(): string {
   return email;
 }
 
+const escapeHtml = (text: string) =>
+  text.replace(
+    /[&<>"]/g,
+    (char) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]!,
+  );
+
 /**
- * Send the weekly reading summary email
+ * Send the weekly reading summary email, with an optional small-print `footer`
  */
 export async function sendWeeklySummary(
   html: string,
   subject: string,
+  footer?: string,
 ): Promise<{ id: string }> {
   const apiKey = getApiKey();
   const recipientEmail = getRecipientEmail();
+
+  if (footer) {
+    const footerHtml = `<p style="color: #999; font-size: 12px; margin-top: 40px;">${escapeHtml(footer)}</p>`;
+    html = html.includes('</body>')
+      ? html.replace('</body>', `${footerHtml}\n</body>`)
+      : `${html}\n${footerHtml}`;
+  }
 
   const payload: SendEmailPayload = {
     from: FROM,

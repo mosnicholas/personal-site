@@ -53,7 +53,7 @@ The endpoint has to be live in production first (step 3).
   curl -H "Authorization: Bearer $CRON_SECRET" \
     "https://<your-domain>/api/weekly-summary?email=false&save=false"
   ```
-- Tag rebalance (also tags anything saved in the last `days` that has no tags; a big number backfills the library, repeat until `incomplete` is false):
+- Tag rebalance (also tags anything saved in the last `days` that has no tags; a big number backfills the library). Each run tags a few hundred documents and skips the Opus cleanup until nothing is left untagged, so repeat until `incomplete` is false:
   ```bash
   curl -H "Authorization: Bearer $CRON_SECRET" \
     "https://<your-domain>/api/rebalance-tags?days=3650"
@@ -78,6 +78,8 @@ Every LLM call (chat, tagging, rebalance, weekly summary) is saved to an `llm_tr
    ```
 
 Neon's free plan has 1 GB of storage and suspends the database when idle; the first write after a few idle minutes takes about half a second longer. Chat traces include what visitors typed (never their IP).
+
+Neon doesn't warn before the 1 GB fills up, so the weekly email ends with a line saying how full the log is, which turns into a warning at 80%. Measured sizes: about 3 KB per tagged document, 6 KB per chat message, and 25 KB a week for the rebalance and summary together. If it does fill, new traces stop saving and everything else keeps working; delete old chat traces (`DELETE FROM llm_traces WHERE kind = 'chat' AND created_at < now() - interval '90 days'`) or move to a paid plan.
 
 ## Email setup (Resend + nimo.fyi)
 

@@ -2,13 +2,14 @@ import { rejectUnauthorizedCron } from './_lib/auth.js';
 import { sendWeeklySummary } from './_lib/email.js';
 import { fetchArticles, saveDocument } from './_lib/readwise.js';
 import { generateWeeklySummary } from './_lib/summary.js';
+import { describeTraceStorage } from './_lib/traces.js';
 
 /**
  * Weekly Reading Summary Cron Handler
  *
  * Triggered by Vercel cron (every Sunday at 9am UTC, see vercel.json), which
- * sends `Authorization: Bearer $CRON_SECRET`. Fetches articles from the past
- * 7 days, generates an AI-powered summary, and emails it.
+ * sends `Authorization: Bearer $CRON_SECRET`. Fetches articles saved or opened
+ * in the past 7 days, generates an AI-powered summary, and emails it.
  *
  * Can also be triggered manually with the same Authorization header and
  * optional query params:
@@ -47,13 +48,21 @@ export default {
       const articles = await fetchArticles({ updatedAfter });
       console.log(`Found ${articles.length} documents in the time range`);
 
+      // `updatedAfter` also matches old documents whose tags were just
+      // rewritten (by the Sunday rebalance or a backfill), so keep only what
+      // was saved or opened in the window
+      const since = updatedAfter.getTime();
+      const inWindow = (date: string | null) =>
+        date !== null && Date.parse(date) >= since;
+
       // Filter to articles with meaningful content
       const articlesToSummarize = articles.filter(
         (a) =>
-          a.category === 'article' ||
-          a.category === 'email' ||
-          a.category === 'pdf' ||
-          a.reading_progress > 0.1, // Include items with at least 10% progress
+          (inWindow(a.saved_at) || inWindow(a.last_opened_at)) &&
+          (a.category === 'article' ||
+            a.category === 'email' ||
+            a.category === 'pdf' ||
+            a.reading_progress > 0.1), // Include items with at least 10% progress
       );
 
       console.log(
@@ -90,7 +99,13 @@ export default {
       // A failed email or save shouldn't fail the whole run
       if (shouldSendEmail) {
         try {
-          await sendWeeklySummary(summary.html, summary.subject);
+          // The trace database gives no warning before it fills up, so the
+          // email reports how full it is
+          await sendWeeklySummary(
+            summary.html,
+            summary.subject,
+            await describeTraceStorage(),
+          );
           emailSent = true;
           console.log('Email sent successfully');
         } catch (emailError) {

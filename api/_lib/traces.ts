@@ -94,6 +94,35 @@ export async function recordTrace(trace: Trace): Promise<void> {
   }
 }
 
+// Neon's free plan blocks writes past 1 GB per project and doesn't warn first
+const STORAGE_LIMIT_BYTES = 1024 ** 3;
+const STORAGE_WARN_RATIO = 0.8;
+
+/**
+ * One line on how full the trace database is, for the weekly email
+ */
+export async function describeTraceStorage(): Promise<string> {
+  const sqlPromise = getSql();
+  if (!sqlPromise) return 'LLM trace log is off: DATABASE_URL is not set.';
+  try {
+    const sql = await sqlPromise;
+    const [row] = await sql`
+      SELECT pg_database_size(current_database()) AS bytes,
+             (SELECT count(*) FROM llm_traces) AS calls`;
+    const bytes = Number(row.bytes);
+    const usage = `${Math.round(bytes / 1024 ** 2)} MB of 1 GB (${Math.round(
+      (bytes / STORAGE_LIMIT_BYTES) * 100,
+    )}%), ${Number(row.calls).toLocaleString('en-US')} LLM calls`;
+    return bytes < STORAGE_LIMIT_BYTES * STORAGE_WARN_RATIO
+      ? `LLM trace log: ${usage}.`
+      : `LLM trace log is nearly full: ${usage}. New traces stop saving at 1 GB; delete old chat traces or upgrade the Neon plan.`;
+  } catch (error) {
+    ready = undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    return `LLM trace log: couldn't check its size (${message}).`;
+  }
+}
+
 /**
  * Makes an LLM call and records it. `interpret` turns the response into what
  * the app uses; the response is recorded even when that step throws.
