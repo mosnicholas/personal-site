@@ -22,7 +22,7 @@ In Vercel project settings, add these for Production (and Preview if you want th
 | `WEEKLY_SUMMARY_RECIPIENT_EMAIL` | weekly summary email   | Your inbox (mail comes from `reader@nimo.fyi`)        |
 | `CRON_SECRET`             | both cron jobs                | Make one up: `openssl rand -hex 32 \| pbcopy`          |
 
-The webhook and cron endpoints refuse requests when their secret isn't set. Env var changes only apply to new deployments, so redeploy after adding one.
+The cron endpoints refuse requests when `CRON_SECRET` isn't set. Until `READWISE_WEBHOOK_SECRET` is set, the webhook answers Readwise but doesn't tag anything (Readwise only shows the secret after its endpoint test passes). Env var changes only apply to new deployments, so redeploy after adding one.
 
 ### 3. Deploy
 Push to `main` (or click "Deploy"). Vercel will:
@@ -42,8 +42,8 @@ The endpoint has to be live in production first (step 3).
 
 1. Go to https://readwise.io/webhook and add a webhook
 2. URL: `https://nimo.fyi/api/readwise-webhook` (use the apex domain: `www` answers with a redirect, which webhook POSTs don't follow)
-3. Event: `reader.non_feed_document.created` to tag what you save, or `reader.any_document.created` to also tag every RSS feed item. Don't add `reader.document.tags_updated`; the handler ignores it anyway
-4. Save, copy the secret Readwise shows, add it to Vercel as `READWISE_WEBHOOK_SECRET`, and redeploy
+3. Check exactly one event: **Reader Non Feed Document Created** to tag what you save, or **Reader Any Document Created** to also tag every RSS feed item. Each checked event is a separate delivery, so checking several tags every document several times. Don't add `reader.document.tags_updated`; the handler ignores it anyway
+4. Click Test Endpoint (it passes before the secret is set), then Create Webhook. Copy the secret Readwise shows, add it to Vercel as `READWISE_WEBHOOK_SECRET`, and redeploy
 5. Save any article to Reader. Within a few seconds it should have tags, and Vercel → Logs shows `/api/readwise-webhook`
 
 ### 6. Test

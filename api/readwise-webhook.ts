@@ -9,9 +9,11 @@ import { getTaxonomy } from './_lib/taxonomy.js';
  * Receives Readwise Reader webhooks when new documents are saved, tags them
  * from the existing taxonomy (see _lib/taxonomy.ts), and writes the tags back.
  *
- * Subscribe it to `reader.any_document.created` (or the feed / non-feed
- * variants). Readwise sends the document fields at the top level of the JSON
- * body, along with `event_type` and the webhook `secret`.
+ * Subscribe it to one created event: `reader.non_feed_document.created` (what
+ * you save) or `reader.any_document.created` (also every RSS item). Each
+ * checked event is a separate delivery, so checking several tags a document
+ * several times. Readwise sends the document fields at the top level of the
+ * JSON body, along with `event_type` and the webhook `secret`.
  * Docs: https://docs.readwise.io/readwise/docs/webhooks
  */
 
@@ -34,17 +36,30 @@ export default {
       return errorResponse('Method not allowed', 405);
     }
 
-    const expectedSecret = process.env.READWISE_WEBHOOK_SECRET;
-    if (!expectedSecret) {
-      console.error('READWISE_WEBHOOK_SECRET is not set - rejecting webhook');
-      return errorResponse('Webhook not configured', 500);
-    }
-
     const payload = (await request
       .json()
       .catch(() => null)) as WebhookPayload | null;
     if (!payload) {
       return errorResponse('Invalid JSON body', 400);
+    }
+
+    // Only tag new documents. Writing tags triggers `tags_updated`, so
+    // reacting to other events could loop forever. Skipping does nothing, so
+    // it needs no secret, which also lets Readwise's "Test Endpoint" pass.
+    if (!payload.event_type?.endsWith('document.created')) {
+      return Response.json({ skipped: true, eventType: payload.event_type });
+    }
+
+    // Readwise only shows the secret after the webhook is created, and it
+    // won't create one until the endpoint answers its test. Until the secret
+    // is set, acknowledge events without acting on them.
+    const expectedSecret = process.env.READWISE_WEBHOOK_SECRET;
+    if (!expectedSecret) {
+      console.warn('READWISE_WEBHOOK_SECRET is not set - ignoring webhook');
+      return Response.json({
+        skipped: true,
+        reason: 'READWISE_WEBHOOK_SECRET is not set',
+      });
     }
 
     // Readwise puts the secret in the body; the headers support manual testing
@@ -54,15 +69,6 @@ export default {
       request.headers.get('authorization')?.replace(/^Bearer /, '');
     if (!secretsMatch(providedSecret, expectedSecret)) {
       return errorResponse('Unauthorized - invalid webhook secret', 401);
-    }
-
-    // Only tag new documents. Writing tags triggers `tags_updated`, so
-    // reacting to other events could loop forever.
-    if (
-      payload.event_type &&
-      !payload.event_type.endsWith('document.created')
-    ) {
-      return Response.json({ skipped: true, eventType: payload.event_type });
     }
 
     if (!payload.id || !payload.url || !payload.title) {
