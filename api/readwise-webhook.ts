@@ -9,10 +9,10 @@ import { getTaxonomy } from './_lib/taxonomy.js';
  * Receives Readwise Reader webhooks when new documents are saved, tags them
  * from the existing taxonomy (see _lib/taxonomy.ts), and writes the tags back.
  *
- * Subscribe it to one created event: `reader.non_feed_document.created` (what
- * you save) or `reader.any_document.created` (also every RSS item). Each
- * checked event is a separate delivery, so checking several tags a document
- * several times. Readwise sends the document fields at the top level of the
+ * Subscribe it to one created event, `reader.any_document.created` (what you
+ * save and every feed item), or `reader.non_feed_document.created` (only what
+ * you save). Each checked event is a separate delivery, so checking several
+ * tags a document several times. Readwise sends the document fields at the top level of the
  * JSON body, along with `event_type` and the webhook `secret`.
  * Docs: https://docs.readwise.io/readwise/docs/webhooks
  */
@@ -78,7 +78,9 @@ export default {
     }
 
     try {
-      console.log(`Processing article: ${payload.title} (${payload.id})`);
+      console.log(
+        `Processing ${payload.event_type}: ${payload.title} (${payload.id})`,
+      );
 
       // Readwise may have a better summary than the webhook payload
       let articleSummary = payload.summary;

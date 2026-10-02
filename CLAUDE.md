@@ -55,7 +55,7 @@ personal-site/
 ├── vite.config.ts
 ├── eslint.config.js
 ├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
-├── vercel.json                # framework: vite + crons
+├── vercel.json                # framework: vite, fluid: true, 300s for the crons, crons
 └── .npmrc                     # min-release-age=7
 ```
 
@@ -88,7 +88,7 @@ personal-site/
 - All use the Web standard `export default { fetch(request: Request) }` signature - no `@vercel/node`
 - `chat.ts`: takes `{ messages: [{ role, content }] }`, validates it (user turns <= 500 chars, last 20 kept, must end on a user turn), calls Claude Haiku 4.5, returns `{ response }`; errors return `{ error }` without internal details. Rate limited per instance: 10/min per IP, 200/hour overall (see DEPLOY.md for the free WAF rule and Anthropic spend cap)
 - `readwise-webhook.ts`: only handles `*document.created` events to avoid loops (anything else gets a 200 `skipped`, no secret needed); acts only with a matching `READWISE_WEBHOOK_SECRET` (Readwise sends it as `secret` in the body), and answers 200 without acting while it's unset, because Readwise won't create the webhook (and reveal the secret) until its endpoint test passes; tags the document via `classifyDocument` against the current taxonomy and replaces its tags (the user never tags by hand)
-- `rebalance-tags.ts`: same cron auth; `?days=` (default 8) sets how far back to look for untagged documents, so a big value backfills. Applies changes directly, no review step. Works within a ~220s time budget and reports `incomplete` if it stopped early; it's idempotent, so the next run continues. The sweep lists library locations a page at a time (never the RSS feed, which can hold thousands of items against a 20 requests/min limit) and skips the Opus plan until nothing is left untagged
+- `rebalance-tags.ts`: same cron auth; `?days=` (default 8) sets how far back to look for untagged documents, so a big value backfills. Applies changes directly, no review step. Works within a ~220s time budget and reports `incomplete` if it stopped early; it's idempotent, so the next run continues. The sweep lists each location a page at a time (library first, then the feed, which can hold thousands of items against a 20 requests/min limit), tags as it goes, and skips the Opus plan until nothing is left untagged
 - `weekly-summary.ts`: requires `Authorization: Bearer $CRON_SECRET` (Vercel cron sends this; `rejectUnauthorizedCron` in `_lib/auth.ts`); `?days=` (1-31), `?email=false`, `?save=false` for manual runs. It summarizes documents saved or opened in the window, not everything updated: rewriting tags can bump `updated_at` on old documents. The summary is written by Claude Opus 5.5 at `medium` effort with server-side refusal fallbacks (`fallbacks: "default"`)
 
 ## Development

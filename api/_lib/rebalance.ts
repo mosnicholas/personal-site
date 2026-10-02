@@ -27,9 +27,15 @@ import { recordTrace } from './traces.js';
 
 const PLAN_MODEL = 'claude-opus-5-5';
 const CLASSIFY_CONCURRENCY = 5;
-// Where saved documents live. Asking per location skips RSS feed items at the
-// source; there can be thousands, and listing is rate limited to 20 pages/min
-const LIBRARY_LOCATIONS: Location[] = ['new', 'later', 'shortlist', 'archive'];
+// Library first, so a backfill tags what was saved before the RSS feed, which
+// can hold thousands of items
+const SWEEP_LOCATIONS: Location[] = [
+  'new',
+  'later',
+  'shortlist',
+  'archive',
+  'feed',
+];
 // Stop the sweep early enough to leave time to load `other` and write
 const SWEEP_RESERVE_MS = 60_000;
 // Only start planning if a slow Opus response still fits
@@ -91,9 +97,8 @@ export interface RebalanceReport {
   incomplete: boolean;
 }
 
-// Saved documents only: no feed items, highlights, or notes
-const isLibraryDocument = (article: Article) =>
-  article.location !== 'feed' &&
+// Documents only: no highlights or notes
+const isTaggableDocument = (article: Article) =>
   article.category !== 'highlight' &&
   article.category !== 'note' &&
   !article.parent_id;
@@ -205,13 +210,13 @@ export async function rebalanceTags({
   // further each run instead of spending its budget listing
   const since = new Date(Date.now() - sweepDays * 24 * 60 * 60 * 1000);
   const missed: Article[] = [];
-  sweep: for (const location of LIBRARY_LOCATIONS) {
+  sweep: for (const location of SWEEP_LOCATIONS) {
     for await (const page of articlePages({
       updatedAfter: since,
       location,
       tag: '',
     })) {
-      const docs = page.filter(isLibraryDocument);
+      const docs = page.filter(isTaggableDocument);
       for (let i = 0; i < docs.length; i += CLASSIFY_CONCURRENCY) {
         if (outOfTime(SWEEP_RESERVE_MS)) break sweep;
         const batch = docs.slice(i, i + CLASSIFY_CONCURRENCY);
