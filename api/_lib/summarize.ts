@@ -16,7 +16,7 @@ import { tracedCall } from './traces.js';
 export const SUMMARY_MODEL = 'claude-sonnet-5-5';
 // Stored with each summary; bump it when the prompt changes and the daily
 // sync redoes every summary written by an older version
-export const SUMMARY_VERSION = `${SUMMARY_MODEL}/4`;
+export const SUMMARY_VERSION = `${SUMMARY_MODEL}/5`;
 // About 150k tokens: whole articles and long reports; books are cut off
 const MAX_TEXT_CHARS = 600_000;
 // Below this there's nothing worth summarizing beyond the title
@@ -31,7 +31,7 @@ export const countWords = (text: string) =>
 
 const SYSTEM_PROMPT = `You summarize documents for a personal reading library. The reader saves far more than they can read, and uses these summaries to recall what each piece said and to decide which are worth reading in full. Models also read them to tag and connect documents. Write the summary that serves that: the main points and what supports them, specific rather than vague, and much quicker to read than the document itself.
 
-Write plain prose. If the text is cut off, summarize what's there and say it's partial. If it's mostly navigation, ads, or boilerplate, summarize the substance you can find.`;
+The reader skims, so make it easy to take in: lead with the main point, and give it whatever structure fits the content, such as short paragraphs or a list. If the text is cut off, summarize what's there and say it's partial. If it's mostly navigation, ads, or boilerplate, summarize the substance you can find.`;
 
 export interface SummarizableDocument {
   title: string;

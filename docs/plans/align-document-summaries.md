@@ -53,7 +53,23 @@ Tested on 35 documents stratified by length, before rollout (median summary as a
 | 3,000-6,000 | 6 | 18% | 8% |
 | 6,000+ | 6 | 10% | 4% |
 
-Total output fell to 44% of `/2`. Adding the document's word count to the input (no instruction) changed nothing on short posts, so the model seems to have a floor of roughly 150-250 words; hence the 300-word cutoff (the reader chose it over 500). The eval should confirm this didn't cost faithfulness or coverage: compression is exactly where those trade off.
+Total output fell to 44% of `/2`. Adding the document's word count to the input (no instruction) changed nothing on short posts, so the model seems to have a floor of roughly 150-250 words; hence the 300-word cutoff (the reader chose it over 500).
+
+`/4` wrote one dense paragraph even for long documents, and the reader wants summaries that are easy to read, so `/5` replaces "Write plain prose." with "The reader skims, so make it easy to take in: lead with the main point, and give it whatever structure fits the content, such as short paragraphs or a list."
+
+**Quick judge check (2026-10-02, before rollout).** Claude Opus 5.5 listed each document's key points from the full text alone (12.4 per document, 44% essential), then scored each summary blind and on its own: key points covered (weighted, essential ×2, partial = half), statements the document doesn't support, and readability 1-5. 33 documents over 300 words:
+
+| | `/2` summary + key points | `/4` | `/5` |
+| - | - | - | - |
+| Median words | 710 | 305 | 380 |
+| Key points covered | 97% | 91% | 94% |
+| Essential points missed | 0 | 0 | 0 |
+| Summaries with an unsupported statement | 42% | 30% | 33% |
+| Readability (1-5) | 3.8 | 2.9 | 4.9 |
+
+`/5` vs `/4`: coverage +4 points (95% CI +2 to +6), readability +2.0 (+1.8 to +2.2). `/4` vs `/2`: coverage -6 points (-9 to -4). Most flagged statements in `/5` were small: facts from outside the document (an author's name or title) or overreach. One was a real error (it swapped which of two PRs was merged). The planned second judge, Claude Fable 5.1, wasn't available on this API key: it needs data retention enabled on the workspace.
+
+Caveats: one judge, from the same family as the summarizer (all three candidates are Sonnet, so that bias shouldn't favor one version), coverage measured against that judge's own key points, and judges are known to favor Markdown formatting, which may inflate `/5`'s readability score. Cost $4.83. The eval should confirm this didn't cost faithfulness or coverage: compression is exactly where those trade off.
 
 ## How summaries are evaluated now
 
@@ -162,7 +178,7 @@ All on the same 100 documents, measuring cost and latency from `llm_traces`:
 
 | Candidate | Why |
 | --------- | --- |
-| Sonnet 5.5, current prompt (`/4`, short and purpose-led) | The baseline |
+| Sonnet 5.5, current prompt (`/5`, short, purpose-led, structured to skim) | The baseline |
 | Sonnet 5.5, previous prompt (`/2`, "stands in for the document") | What the simpler prompt cost or gained |
 | Sonnet 5.5 at `low` effort | More summarizer thinking can hurt faithfulness, and it costs more |
 | Sonnet 5.5 with Citations | Every claim traceable to the source. Needs plain-text output instead of structured outputs (incompatible) |
