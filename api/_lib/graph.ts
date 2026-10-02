@@ -8,7 +8,9 @@
 import { requireSql } from './db.js';
 import { OTHER_TAG } from './taxonomy.js';
 
-// Edges between tags that share fewer documents than this are noise
+// Tags on a single document, and links between tags sharing only one, are
+// noise on the map
+const MIN_TAG_DOCUMENTS = 2;
 const MIN_EDGE_WEIGHT = 2;
 const TIMELINE_WEEKS = 52;
 const MAX_TAG_DOCUMENTS = 200;
@@ -67,6 +69,7 @@ export async function readingGraph(): Promise<ReadingGraph> {
         LEFT JOIN tags t ON t.name = tag
         WHERE d.location IS DISTINCT FROM 'feed' AND tag <> ${OTHER_TAG}
         GROUP BY tag
+        HAVING count(*) >= ${MIN_TAG_DOCUMENTS}
         ORDER BY count(*) DESC, tag`,
       sql`
         SELECT a AS source, b AS target, count(*) AS weight

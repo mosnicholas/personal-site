@@ -81,8 +81,8 @@ Readwise stays the source of truth, and Postgres keeps a mirror of the library (
 Readwise holds the taxonomy: it's the set of tags in use.
 
 - **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 gives the document up to 5 tags for its main topics, from our summary. It sees every existing tag with how many documents use it and its glossary definition, is told to reuse them, and creates a new tag only when none fits, since the taxonomy is still growing. Documents it can't place get `other`.
-- **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate and overlapping tags and sorts out `other`. Everything is applied straight away; the plan and every before → after change (with document titles) are saved in the trace log.
-- **Glossary** (`/api/tag-glossary`, Sundays 8am UTC, after the cleanup): Claude Opus 5.5 writes a one-line definition for every tag (what it covers, and what it doesn't when a neighbor is close) and sorts the tags into 6-12 named clusters, keeping last week's where they still fit. The tagger reads the definitions. Claude Sonnet 5.5 then writes a brief for each tag with 3+ saved documents whose count changed. Reruns within 6 days only continue the briefs (`?redefine=true` redoes the definitions).
+- **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate and overlapping tags, folds one-off tags into the broader tag that covers them, and sorts out `other`. Everything is applied straight away; the plan and every before → after change (with document titles) are saved in the trace log.
+- **Glossary** (`/api/tag-glossary`, Sundays 8am UTC, after the cleanup): Claude Opus 5.5 writes a one-line definition for every tag used by two or more documents (what it covers, and what it doesn't when a neighbor is close) and sorts them into 6-12 named clusters, keeping last week's where they still fit. The tagger reads the definitions. Claude Sonnet 5.5 then writes a brief for each tag with 3+ saved documents whose count changed. Reruns within 6 days only continue the briefs (`?redefine=true` redoes the definitions).
 - **Merges stick:** each run reads earlier runs' merges from the trace log. They're shown to Opus, a retired tag that comes back is folded into its replacement without asking, and a plan can't merge a tag back into one it replaced (the first backfill flipped `ux-design` and `user-experience` between two runs).
 
 To see every change a rebalance made, in the Neon SQL editor:
@@ -99,7 +99,7 @@ ORDER BY r.created_at, title;
 
 ## /reading (public)
 
-`nimo.fyi/reading` maps everything saved to the library: a force-directed graph of the tags (size = documents, colour = cluster, links = tags that share documents), the clusters over time, and a panel per tag with its definition, brief and documents. It reads `/api/reading-graph`, which is public and cached at Vercel's CDN for an hour. Feed items and reading state never appear. The clusters and briefs show up after the first glossary run.
+`nimo.fyi/reading` maps everything saved to the library: a force-directed graph of the tags used by two or more documents (size = documents, colour = cluster, links = tags that share documents), the clusters over time, and a panel per tag with its definition, brief and documents. It reads `/api/reading-graph`, which is public and cached at Vercel's CDN for an hour. Feed items and reading state never appear. The clusters and briefs show up after the first glossary run.
 
 ## Reading synthesis
 

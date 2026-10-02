@@ -15,6 +15,10 @@ const GLOSSARY_MODEL = 'claude-opus-5-5';
 const BRIEF_MODEL = 'claude-sonnet-5-5';
 // Definitions are redone weekly; reruns within the week skip them
 const REDEFINE_AFTER_MS = 6 * 24 * 60 * 60 * 1000;
+// One-off tags don't need a definition or a place on the map, and a cap
+// keeps the response well inside the 300s function limit
+const MIN_DOCUMENTS_FOR_DEFINITION = 2;
+const MAX_DEFINED_TAGS = 250;
 const MIN_DOCUMENTS_FOR_BRIEF = 3;
 const MAX_BRIEF_DOCUMENTS = 40;
 const BRIEF_CONCURRENCY = 6;
@@ -24,7 +28,7 @@ export interface GlossaryEntry {
   cluster: string | null;
 }
 
-const GLOSSARY_PROMPT = `You keep the glossary for the tag taxonomy of a personal reading library. You get every tag in use, with how many documents carry it and a few example titles, plus last week's definition and cluster where there was one.
+const GLOSSARY_PROMPT = `You keep the glossary for the tag taxonomy of a personal reading library. You get the tags in use by more than one document, with how many documents carry each and a few example titles, plus last week's definition and cluster where there was one.
 
 1. For every tag, write a definition of at most 15 words saying what it covers, precise enough that a tagger can tell it from neighboring tags. When a neighbor is close, say what this one excludes (for example "Measuring model quality and benchmarks; not training methods").
 2. Group all the tags into 6 to 12 clusters with short, plain labels of 1 to 3 words (for example "AI engineering", "Company building", "Food & cooking"). Every tag belongs to exactly one cluster.
@@ -102,8 +106,10 @@ export async function defineTags({ force = false } = {}): Promise<
     FROM documents, unnest(tags) AS tag
     WHERE tag <> ${OTHER_TAG}
     GROUP BY tag
-    ORDER BY count(*) DESC, tag`;
-  if (rows.length === 0) return { skipped: 'no tagged documents yet' };
+    HAVING count(*) >= ${MIN_DOCUMENTS_FOR_DEFINITION}
+    ORDER BY count(*) DESC, tag
+    LIMIT ${MAX_DEFINED_TAGS}`;
+  if (rows.length === 0) return { skipped: 'no tags in use yet' };
 
   const previous = await getGlossary();
   const request = {
@@ -185,7 +191,7 @@ export async function defineTags({ force = false } = {}): Promise<
       definition = excluded.definition,
       cluster = excluded.cluster,
       defined_at = now()`;
-  // Tags merged away or no longer used drop out of the glossary
+  // Tags merged away or now used by a single document drop out
   await sql`DELETE FROM tags WHERE NOT (name = ANY(${[...names]}))`;
 
   return { tags: values.length, clusters: glossary.clusters.length };
