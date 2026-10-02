@@ -1,14 +1,15 @@
 /**
  * Postgres (Neon's free plan via the Vercel Marketplace, which sets
- * DATABASE_URL). Holds the LLM trace log, a mirror of the Readwise library
- * with each saved document's text and our summary, and the tag glossary.
+ * DATABASE_URL). Holds the LLM trace log and model prices, a mirror of the
+ * Readwise library with each saved document's text and our summary, and the
+ * tag glossary.
  * Tables are created on first use; MIGRATIONS (below) change existing ones,
  * once each.
  */
 
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 
-import { tokenUsage, type Usage } from './pricing.js';
+import { priceAt, SEED_PRICES, tokenUsage, type Usage } from './pricing.js';
 
 export type Sql = NeonQueryFunction<false, false>;
 
@@ -144,8 +145,8 @@ const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
       WHERE response ? 'usage' AND input_tokens IS NULL`;
     const updates = rows.map((row) => {
       const usage = tokenUsage(
-        (row.model as string | null) ?? '',
         row.usage as Usage,
+        priceAt(SEED_PRICES, (row.model as string | null) ?? '', new Date()),
       );
       return {
         id: String(row.id),
@@ -172,6 +173,43 @@ const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
             cache_read_input_tokens integer, cost_usd numeric)
         WHERE t.id = r.id`;
     }
+  },
+
+  // 2. Prices by date, so each call is priced at the rate in effect when it
+  // was made; the daily price check (prices-check.ts) adds rows as they change
+  async (sql) => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS model_prices (
+        model text NOT NULL,
+        effective_from date NOT NULL,
+        input numeric NOT NULL,
+        output numeric NOT NULL,
+        cache_write_5m numeric NOT NULL,
+        cache_write_1h numeric NOT NULL,
+        cache_read numeric NOT NULL,
+        source text NOT NULL,
+        recorded_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (model, effective_from)
+      )`;
+    await sql`
+      INSERT INTO model_prices (model, effective_from, input, output,
+        cache_write_5m, cache_write_1h, cache_read, source)
+      SELECT model, effective_from, input, output, cache_write_5m,
+        cache_write_1h, cache_read, 'pricing.ts seed'
+      FROM jsonb_to_recordset(${JSON.stringify(
+        SEED_PRICES.map((price) => ({
+          model: price.model,
+          effective_from: price.effectiveFrom,
+          input: price.input,
+          output: price.output,
+          cache_write_5m: price.cacheWrite5m,
+          cache_write_1h: price.cacheWrite1h,
+          cache_read: price.cacheRead,
+        })),
+      )}::jsonb) AS r(model text, effective_from date, input numeric,
+        output numeric, cache_write_5m numeric, cache_write_1h numeric,
+        cache_read numeric)
+      ON CONFLICT DO NOTHING`;
   },
 ];
 

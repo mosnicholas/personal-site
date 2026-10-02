@@ -14,7 +14,7 @@ Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Four parts:
 - **Vercel** for hosting; `/api/*.ts` are Vercel Functions
 - **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
 - **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and tagging, `claude-sonnet-5-5` for document summaries and tag briefs, `claude-opus-5-5` for the weekly tag rebalance, glossary and summary, and the monthly synthesis
-- **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log, the library mirror with each saved document's full text and our summary, and the tag glossary
+- **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log and dated model prices, the library mirror with each saved document's full text and our summary, and the tag glossary
 - **Resend** for email (personal account, `nimo.fyi` verified; sender `reader@nimo.fyi`, recipient `WEEKLY_SUMMARY_RECIPIENT_EMAIL`)
 - ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
 
@@ -46,6 +46,7 @@ personal-site/
 │   ├── weekly-summary.ts      # Sunday 9am UTC cron: email the reading summary
 │   ├── reading-synthesis.ts   # 1st of the month 10am UTC cron: email a synthesis of the last 90 days
 │   ├── reading-graph.ts       # Public, CDN-cached data for /reading
+│   ├── update-prices.ts       # Daily 5am UTC cron: record model price changes from Anthropic's pricing page
 │   ├── tsconfig.json          # Node/ESM config; Vercel also uses it to compile /api
 │   └── _lib/                  # Helpers; underscore keeps Vercel from deploying them as functions
 │       ├── anthropic.ts       # Shared Anthropic client (checks ANTHROPIC_API_KEY)
@@ -55,7 +56,8 @@ personal-site/
 │       ├── email.ts           # Resend client
 │       ├── glossary.ts        # Opus definitions + clusters, Sonnet tag briefs (`tags` table)
 │       ├── graph.ts           # Queries behind /api/reading-graph
-│       ├── pricing.ts         # Per-model token prices and the cost of a call from its usage
+│       ├── pricing.ts         # Dated model prices (`model_prices`), price lookup, the cost of a call from its usage
+│       ├── prices-check.ts    # Daily check of Anthropic's pricing page: parse, diff, record changes, fill missing costs
 │       ├── rate-limit.ts      # In-memory per-instance rate limiter for /api/chat
 │       ├── readwise.ts        # Readwise Reader v3 client (list, tags, bulk update)
 │       ├── rebalance.ts       # Weekly rebalance: sweep, Opus plan, bulk rewrite
@@ -102,10 +104,11 @@ personal-site/
 
 ### LLM traces
 - Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `document_summary`, `rebalance`, `tag_glossary`, `tag_brief`, `weekly_summary`, `reading_synthesis`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
-- Token usage as reported by the API is stored in columns: `response_model` (the model that answered), `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `cost_usd` computed at write time from `api/_lib/pricing.ts` (input, 5-minute and 1-hour cache writes, cache reads and output each at their own rate; update the table when prices change or a model is added, or new rows get a null cost)
+- Token usage as reported by the API is stored in columns: `response_model` (the model that answered), `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `cost_usd` computed at write time from the `model_prices` table (input, 5-minute and 1-hour cache writes, cache reads and output each at their own rate)
+- `model_prices` has one row per model per price with `effective_from`; `priceAt` picks the latest row in effect at the call's time (the earliest row for calls before it), matching the model ID exactly after dropping a date suffix (`claude-opus-5` must not price `claude-opus-5-5`). `SEED_PRICES` in `pricing.ts` only seeds the table. `update-prices.ts` (daily) parses the Markdown pricing page with no LLM, records new models and changed prices dated today, emails a diff when anything changed or when the check starts failing, and fills `cost_usd` for calls that had no price. Costs assume standard rates (no batch, fast mode or `inference_geo`); if one of those is used, the pricing needs a multiplier
 - Schema changes to existing tables go in `MIGRATIONS` in `api/_lib/db.ts` (run once each; the applied version is in `sync_state` as `schema`)
 - Rebalance traces also store every applied change (`id`, `title`, `before` → `after` tags), which is the undo log, and `renames`, which later runs build on
-- Neon's free plan stops writes at 1 GB (all databases in the project) without warning, so the weekly email ends with `describeTraceLog()`: size and % of 1 GB (a warning from 80%), call count, the last 7 days' AI spend, and a warning naming any model with no price in `pricing.ts`
+- Neon's free plan stops writes at 1 GB (all databases in the project) without warning, so the weekly email ends with `describeTraceLog()`: size and % of 1 GB (a warning from 80%), call count, the last 7 days' AI spend, a warning naming any model with no price, and a warning if the daily price check is failing or hasn't run for 3 days
 - Tracing never breaks the caller; without `DATABASE_URL` it's skipped. New LLM calls should be traced too
 
 ### API functions
@@ -116,6 +119,7 @@ personal-site/
 - `weekly-summary.ts`: requires `Authorization: Bearer $CRON_SECRET` (Vercel cron sends this; `rejectUnauthorizedCron` in `_lib/auth.ts`); `?days=` (1-31), `?email=false`, `?save=false` for manual runs. It summarizes documents saved or opened in the window, not everything updated: rewriting tags can bump `updated_at` on old documents. The summary is written by Claude Opus 5.5 at `medium` effort with server-side refusal fallbacks (`fallbacks: "default"`)
 - `sync-documents.ts`: same cron auth; ~220s budget, half for listing; `?summarize=false` lists only. Reports `incomplete` until the listing is caught up and every saved document has a summary from the current version
 - `tag-glossary.ts`: same cron auth; definitions, then briefs until the budget runs out (`incomplete` while briefs remain)
+- `update-prices.ts`: same cron auth; `?email=false`. Last outcome in `sync_state` as `price_check`
 - `reading-graph.ts`: public, no auth, `Cache-Control: s-maxage=3600, stale-while-revalidate=86400`. Without params: tags on 2+ saved documents (count, cluster, definition), clusters, edges (tag pairs sharing 2+ documents), 52-week timeline by cluster. `?tag=<name>`: definition, brief, up to 200 documents (title, site, original URL, saved date). Saved documents only, never reading state
 - `reading-synthesis.ts`: same cron auth; `?days=` (default 90, so each monthly email covers a quarter; max 183), `?email=false`, `?dry_run=true` (counts and approximate input tokens, no model call). Covers documents saved to the library (`new`, `later`, `shortlist`, `archive`) in the window, with their highlights; one Opus 5.5 call at `medium` effort writes themes, change over time, meta observations, what to read, and questions. It must finish within 300s, so the prompt asks for ~3,000 words
 

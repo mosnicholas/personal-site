@@ -7,7 +7,8 @@
  */
 
 import { getSql } from './db.js';
-import { tokenUsage, type Usage } from './pricing.js';
+import { PRICE_CHECK_STATE, type PriceCheckState } from './prices-check.js';
+import { loadPrices, priceAt, tokenUsage, type Usage } from './pricing.js';
 
 export type TraceKind =
   | 'chat'
@@ -53,8 +54,19 @@ export async function recordTrace(trace: Trace): Promise<void> {
     // Token counts and cost exactly as the API reported them, as columns
     const response = trace.response as
       { model?: string; usage?: Usage } | undefined;
+    // Without a price the cost stays empty; the daily price check fills it in
     const usage = response?.usage
-      ? tokenUsage(response.model ?? trace.model, response.usage)
+      ? tokenUsage(
+          response.usage,
+          priceAt(
+            await loadPrices(sql).catch((error: unknown) => {
+              console.warn('Could not load model prices:', error);
+              return [];
+            }),
+            response.model ?? trace.model,
+            new Date(),
+          ),
+        )
       : undefined;
     await sql`
       INSERT INTO llm_traces (
@@ -121,6 +133,9 @@ export async function loadAppliedRenames(): Promise<Map<string, string>> {
   return renames;
 }
 
+// The price check runs daily; a few missed days means it stopped
+const PRICE_CHECK_STALE_MS = 3 * 24 * 60 * 60 * 1000;
+
 // Neon's free plan blocks writes past 1 GB per project and doesn't warn first
 const STORAGE_LIMIT_BYTES = 1024 ** 3;
 const STORAGE_WARN_RATIO = 0.8;
@@ -130,8 +145,9 @@ const count = (n: unknown, noun: string) =>
 
 /**
  * A few lines for the weekly email: how full the database is (Neon gives no
- * warning), what the LLM calls cost this week, and any calls from a model
- * missing from pricing.ts, whose cost would otherwise go uncounted
+ * warning), what the LLM calls cost this week, any calls from a model with
+ * no price, whose cost would otherwise go uncounted, and whether the daily
+ * price check is working
  */
 export async function describeTraceLog(): Promise<string> {
   const sqlPromise = getSql();
@@ -150,7 +166,9 @@ export async function describeTraceLog(): Promise<string> {
           WHERE created_at > now() - interval '7 days') AS week_usd,
         (SELECT string_agg(DISTINCT response_model, ', ') FROM llm_traces
           WHERE created_at > now() - interval '7 days'
-            AND response IS NOT NULL AND cost_usd IS NULL) AS unpriced`;
+            AND response IS NOT NULL AND cost_usd IS NULL) AS unpriced,
+        (SELECT value FROM sync_state
+          WHERE name = ${PRICE_CHECK_STATE}) AS price_check`;
     const bytes = Number(row.bytes);
     const storage = `${Math.round(bytes / 1024 ** 2)} MB of 1 GB (${Math.round(
       (bytes / STORAGE_LIMIT_BYTES) * 100,
@@ -163,7 +181,20 @@ export async function describeTraceLog(): Promise<string> {
     ];
     if (row.unpriced) {
       lines.push(
-        `No price on file for ${row.unpriced as string}, so this week's spend is undercounted: add it to api/_lib/pricing.ts.`,
+        `No price on file for ${row.unpriced as string}, so this week's spend is undercounted. The daily price check adds models listed on Anthropic's pricing page; for one that isn't, add a row to model_prices.`,
+      );
+    }
+    const check = row.price_check as PriceCheckState | null;
+    if (check && !check.ok) {
+      lines.push(
+        `The daily model price check has failed since ${check.failingSince?.slice(0, 10) ?? check.checkedAt.slice(0, 10)} (${check.error ?? 'unknown error'}), so price changes since then aren't recorded.`,
+      );
+    } else if (
+      check &&
+      Date.now() - Date.parse(check.checkedAt) > PRICE_CHECK_STALE_MS
+    ) {
+      lines.push(
+        `Model prices were last checked on ${check.checkedAt.slice(0, 10)}; the daily check isn't running.`,
       );
     }
     return lines.join(' ');

@@ -21,7 +21,8 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - `/api/tag-glossary` - weekly cron where Claude Opus 5.5 defines and clusters every tag and Claude Sonnet 5.5 writes a brief per tag
 - `/reading` - a public map of everything I've saved: tag clusters, how they've moved over time, and a brief per tag
 - `/api/rebalance-tags` - weekly cron where Claude Opus 5.5 merges duplicate and overlapping tags
-- Every LLM call is saved to Postgres (request, response, result) for comparing models later
+- Every LLM call is saved to Postgres (request, response, result, tokens and cost) for comparing models later
+- `/api/update-prices` - daily cron that keeps model prices in line with Anthropic's pricing page, dated so each call is priced at the rate it was made at
 - `/api/weekly-summary` - weekly cron that emails a Claude Opus 5.5 summary of my reading
 - `/api/reading-synthesis` - monthly cron (or a one-off over any window) that emails a Claude Opus 5.5 synthesis of everything I saved: themes, how my reading changed, and its own observations
 

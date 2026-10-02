@@ -28,7 +28,7 @@ The cron endpoints refuse requests when `CRON_SECRET` isn't set. Until `READWISE
 Push to `main` (or click "Deploy"). Vercel will:
 - Run `npm install` from `package-lock.json`
 - Run `npm run build` (type-checks the frontend **and** the API, then builds)
-- Deploy each file in `/api` as a function and register the crons (one daily, three weekly, one monthly)
+- Deploy each file in `/api` as a function and register the crons (two daily, three weekly, one monthly)
 
 ### 4. Protect the chat endpoint (free)
 `/api/chat` is public and spends your Anthropic credits, so it has three layers:
@@ -117,15 +117,27 @@ GROUP BY 1, 2 ORDER BY usd DESC NULLS LAST;
 ```
 
 1. Vercel → your project → Storage → Create Database → Neon → Free plan → connect it to the project. This sets `DATABASE_URL`
-2. Redeploy. The tables (`llm_traces`, `documents`, `tags`, `sync_state`) are created on first use
+2. Redeploy. The tables (`llm_traces`, `model_prices`, `documents`, `document_texts`, `tags`, `sync_state`) are created on first use
 3. Query it in the Neon console's SQL editor, e.g.
    ```sql
    SELECT created_at, subject_id, result FROM llm_traces WHERE kind = 'tagging' ORDER BY created_at DESC;
    ```
 
-Neon's free plan has 1 GB of storage and suspends the database when idle; the first write after a few idle minutes takes about half a second longer. Chat traces include what visitors typed (never their IP).
+Neon's free plan has 1 GB of storage and 100 CU-hours of compute a month: the database suspends after 5 idle minutes and only counts while awake, and at its smallest size (0.25 CU) 100 CU-hours is about 400 awake hours. This site wakes it for the daily sync, each save, chat messages, the weekly jobs and uncached `/reading` requests, which comes to roughly 5-10 CU-hours a month. If it ever runs out, the database is off until the next month (tagging falls back to Readwise's tag list; traces, `/reading` and summaries stop), and the Neon console shows usage under Monitoring. The first query after a suspend takes about half a second longer. Chat traces include what visitors typed (never their IP).
 
-Neon doesn't warn before the 1 GB fills up, so the weekly email ends with a line saying how full the database is (all databases in the project, which is what Neon counts), which turns into a warning at 80%. The same line gives the week's AI spend, and names any model that answered without a price in `api/_lib/pricing.ts` (a new model, or a fallback), since its calls would otherwise cost $0 in the log. Measured sizes: about 3 KB per tagged document, 6 KB per chat message, and 25 KB a week for the rebalance and summary together. If it does fill, new traces stop saving and everything else keeps working; delete old chat traces (`DELETE FROM llm_traces WHERE kind = 'chat' AND created_at < now() - interval '90 days'`) or move to a paid plan.
+Neon doesn't warn before the 1 GB fills up, so the weekly email ends with a line saying how full the database is (all databases in the project, which is what Neon counts), which turns into a warning at 80%. The same line gives the week's AI spend, names any model that answered without a price (its calls would otherwise cost $0 in the log), and warns if the daily price check is failing. Measured sizes: about 3 KB per tagged document, 6 KB per chat message, and 25 KB a week for the rebalance and summary together. If it does fill, new traces stop saving and everything else keeps working; delete old chat traces (`DELETE FROM llm_traces WHERE kind = 'chat' AND created_at < now() - interval '90 days'`) or move to a paid plan.
+
+### Model prices
+
+`cost_usd` is worked out when each call is saved, from the `model_prices` table: one row per model per price, with the date it took effect (`effective_from`), so every call is priced at the rate that applied when it was made and later changes never rewrite history. Calls from before a model's first row use that row.
+
+`/api/update-prices` runs daily at 5am UTC. It reads the price table on [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) (the Markdown version), and records any new model or changed price, dated that day, then fills in the cost of earlier calls that had no price. No LLM is involved: the parser checks the table's columns, reads `$X / MTok` exactly, and leaves out rows that don't look right (output not above input, cache reads not below it). It emails you only when something changes, with a before/after table, or when the check starts failing (a layout change, or a table that looks cut short), in which case nothing is written and calls keep the last known prices. Run it by hand with:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" "https://nimo.fyi/api/update-prices"
+```
+
+To correct a price by hand, insert a row with the date it took effect, then set `cost_usd = NULL` on the affected calls; the next check reprices them.
 
 ## Email setup (Resend + nimo.fyi)
 
@@ -169,6 +181,7 @@ personal-site/
 │   ├── tag-glossary.ts      # Weekly tag definitions, clusters (Opus 5.5) and briefs (Sonnet 5.5)
 │   ├── weekly-summary.ts    # Weekly reading summary cron (Opus 5.5)
 │   ├── reading-synthesis.ts # Monthly 90-day synthesis cron (Opus 5.5)
+│   ├── update-prices.ts     # Daily model price check (no LLM)
 │   ├── reading-graph.ts     # Public data for /reading
 │   └── _lib/                # Shared helpers (underscore = not deployed as functions)
 ├── src/                     # React app

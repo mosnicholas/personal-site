@@ -3,10 +3,20 @@
   "framework": "vite",
   "fluid": true,
   "rewrites": [
-    { "source": "/reading", "destination": "/index.html" },
-    { "source": "/reading/", "destination": "/index.html" }
+    {
+      "source": "/reading",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/reading/",
+      "destination": "/index.html"
+    }
   ],
   "crons": [
+    {
+      "path": "/api/update-prices",
+      "schedule": "0 5 * * *"
+    },
     {
       "path": "/api/sync-documents",
       "schedule": "0 6 * * *"
