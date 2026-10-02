@@ -105,8 +105,8 @@ export async function setDocumentTags(
 }
 
 /**
- * Store our summary; `version` (model and prompt) lets the sync redo
- * summaries when either changes
+ * Store our summary; `version` (model and prompt) records what wrote it, and
+ * lets a deliberate redo (`?redo=true` on the sync) find older ones
  */
 export async function saveDocumentSummary(
   id: string,
@@ -171,17 +171,19 @@ export interface DocumentToSummarize {
 }
 
 /**
- * Saved (non-feed) documents without a summary from the current `version`:
- * missing ones first, then outdated ones, newest first
+ * Saved (non-feed) documents without a summary, newest first. With `redo`,
+ * also those whose summary came from an older `version`, missing ones first
  */
 export async function documentsNeedingSummary(
   version: string,
   limit: number,
+  redo = false,
 ): Promise<DocumentToSummarize[]> {
   const sql = await requireSql();
   return (await sql`
     SELECT id, title, author, site_name AS site, category FROM documents
-    WHERE summary_model IS DISTINCT FROM ${version}
+    WHERE (summary IS NULL
+        OR (${redo}::boolean AND summary_model IS DISTINCT FROM ${version}))
       AND location IS DISTINCT FROM 'feed'
       AND summary_attempts < ${MAX_SUMMARY_ATTEMPTS}
     ORDER BY summary IS NULL DESC, saved_at DESC NULLS LAST
@@ -190,11 +192,13 @@ export async function documentsNeedingSummary(
 
 export async function countDocumentsNeedingSummary(
   version: string,
+  redo = false,
 ): Promise<number> {
   const sql = await requireSql();
   const [row] = await sql`
     SELECT count(*) AS count FROM documents
-    WHERE summary_model IS DISTINCT FROM ${version}
+    WHERE (summary IS NULL
+        OR (${redo}::boolean AND summary_model IS DISTINCT FROM ${version}))
       AND location IS DISTINCT FROM 'feed'
       AND summary_attempts < ${MAX_SUMMARY_ATTEMPTS}`;
   return Number(row.count);

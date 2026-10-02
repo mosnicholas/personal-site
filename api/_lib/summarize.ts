@@ -16,8 +16,9 @@ import type { OurSummary } from './documents.js';
 import { tracedCall } from './traces.js';
 
 export const SUMMARY_MODEL = 'claude-sonnet-5-5';
-// Stored with each summary; bump it when the prompt changes and the daily
-// sync redoes every summary written by an older version
+// Stored with each summary, so you can tell which prompt wrote it; bump it
+// when the prompt or model changes. Existing summaries stay as they are
+// unless regenerated on purpose (`?redo=true` on /api/sync-documents)
 export const SUMMARY_VERSION = `${SUMMARY_MODEL}/5`;
 // About 150k tokens: whole articles and long reports; books are cut off
 const MAX_TEXT_CHARS = 600_000;

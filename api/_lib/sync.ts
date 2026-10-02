@@ -91,14 +91,14 @@ export async function syncDocuments(
 }
 
 /**
- * Summarize saved documents that don't have a summary from the current
- * SUMMARY_VERSION (missing first, then outdated, newest saves first), from
- * their stored text, fetching and storing it first if needed. `limit` caps
- * how many this run tries, e.g. to check a prompt change on a few first
+ * Summarize saved documents that have no summary yet (newest saves first),
+ * from their stored text, fetching and storing it first if needed. A prompt
+ * change doesn't rewrite existing summaries; `redo` does, for every summary
+ * from an older SUMMARY_VERSION. `limit` caps how many this run tries
  */
 export async function summarizeMissing(
   deadline: number,
-  limit = Infinity,
+  { limit = Infinity, redo = false }: { limit?: number; redo?: boolean } = {},
 ): Promise<{
   summarized: number;
   failed: number;
@@ -114,6 +114,7 @@ export async function summarizeMissing(
       await documentsNeedingSummary(
         SUMMARY_VERSION,
         SUMMARY_CONCURRENCY + tried.size,
+        redo,
       )
     ).filter(({ id }) => !tried.has(id));
     if (batch.length === 0) break;
@@ -163,6 +164,6 @@ export async function summarizeMissing(
   return {
     summarized,
     failed,
-    remaining: await countDocumentsNeedingSummary(SUMMARY_VERSION),
+    remaining: await countDocumentsNeedingSummary(SUMMARY_VERSION, redo),
   };
 }

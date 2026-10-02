@@ -204,7 +204,7 @@ Two or three current open models that handle ~40k-token inputs, on the same docu
 
 ### 5. Decide and ship
 
-Switch the summarizer only if a candidate is within the judges' measured error of Sonnet on faithfulness and coverage, and better on length or cost. Shipping means changing `SUMMARY_MODEL` or the prompt and bumping `SUMMARY_VERSION`. The daily sync then redoes all ~370 summaries, about $10 at Sonnet's rate. Write the decision and its numbers back into this doc.
+Switch the summarizer only if a candidate is within the judges' measured error of Sonnet on faithfulness and coverage, and better on length or cost. Shipping means changing `SUMMARY_MODEL` or the prompt and bumping `SUMMARY_VERSION`, then regenerating the library on purpose with `?redo=true` on the sync (about $6-10 at Sonnet's rate); nothing rewrites summaries automatically. Write the decision and its numbers back into this doc.
 
 ### 6. Distill a small model (only if 0.4 allows it)
 

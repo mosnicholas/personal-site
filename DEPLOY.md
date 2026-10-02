@@ -69,7 +69,7 @@ The endpoint has to be live in production first (step 3).
 Readwise stays the source of truth, and Postgres keeps a mirror of the library (`documents`) so the tagger, the emails and `/reading` don't hit Readwise's 20 requests/min limit.
 
 - **Daily** (`/api/sync-documents`, 6am UTC): copies documents that changed in Readwise into the mirror, stores each saved document's full text (`document_texts`), and has Claude Sonnet 5.5 summarize documents that don't have a current summary. Each summary is written for recalling what a piece said and deciding whether to read it in full, structured to skim (main point first, short sections or bullets); the model picks the length. Short posts (300 words or fewer) are kept as they are. Feed items keep Readwise's summary and aren't stored in full.
-- **Changing the summary prompt or model**: bump `SUMMARY_VERSION` in `api/_lib/summarize.ts`; the daily sync then redoes every summary from the stored text, about 70 a run (run it by hand to go faster), and the next glossary run refreshes the tag briefs.
+- **Changing the summary prompt or model**: test it with the summary eval (`scripts/eval/README.md`), then bump `SUMMARY_VERSION` in `api/_lib/summarize.ts`. New saves get the new prompt; existing summaries stay as they are. To regenerate them all, run the sync with `?redo=true` until `incomplete` is false (about 65 a run); the next glossary run then refreshes the tag briefs.
 - **On save**: the webhook writes our summary straight away when Readwise has the text ready; otherwise the next daily sync does.
 - **Backfill**: the first sync lists the whole library and summarizes it over several runs. Run it until `incomplete` is false (`?summarize=false` lists only, to see the size first):
   ```bash

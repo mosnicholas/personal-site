@@ -7,14 +7,16 @@ import { summarizeMissing, syncDocuments } from './_lib/sync.js';
  * Triggered by Vercel cron daily at 6am UTC (see vercel.json) with
  * `Authorization: Bearer $CRON_SECRET`. Copies documents that changed in
  * Readwise into the `documents` mirror, then writes our summaries for saved
- * documents that don't have one (see _lib/sync.ts).
+ * documents that don't have one (see _lib/sync.ts). Changing the summary
+ * prompt doesn't rewrite existing summaries; `redo` does, on purpose.
  *
  * The first run backfills the whole library; it takes several runs, each
  * resuming where the last stopped. Run it by hand with the same header until
  * `incomplete` is false. Options:
  * - summarize: Whether to write summaries this run (default: true)
- * - limit: Most summaries to write this run, e.g. 12 to check a prompt change
- *   before redoing the library (default: as many as fit)
+ * - redo: Also rewrite summaries written by an older SUMMARY_VERSION; repeat
+ *   until `incomplete` is false to regenerate the library (default: false)
+ * - limit: Most summaries to write this run (default: as many as fit)
  */
 
 // Vercel stops functions at 300s; a summary in flight can take a minute
@@ -37,12 +39,13 @@ export default {
       const params = new URL(request.url).searchParams;
       const shouldSummarize = params.get('summarize') !== 'false';
       const limit = Number(params.get('limit')) || Infinity;
+      const redo = params.get('redo') === 'true';
 
       const listing = await syncDocuments(
         shouldSummarize ? started + TIME_BUDGET_MS * LISTING_SHARE : deadline,
       );
       const summaries = shouldSummarize
-        ? await summarizeMissing(deadline, limit)
+        ? await summarizeMissing(deadline, { limit, redo })
         : undefined;
 
       const report = {
