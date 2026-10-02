@@ -14,6 +14,9 @@
 # vercel
 .vercel
 
+# eval runs hold full texts of the reading library; never commit them
+/scripts/eval/runs
+
 # misc
 .DS_Store
 .env

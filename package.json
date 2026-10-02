@@ -13,7 +13,12 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "eval:pick": "node --env-file-if-exists=.env.local --import ./scripts/eval/register.mjs scripts/eval/pick.ts",
+    "eval:summarize": "node --env-file-if-exists=.env.local --import ./scripts/eval/register.mjs scripts/eval/summarize.ts",
+    "eval:judge": "node --env-file-if-exists=.env.local --import ./scripts/eval/register.mjs scripts/eval/judge.ts",
+    "eval:agents": "node --env-file-if-exists=.env.local --import ./scripts/eval/register.mjs scripts/eval/agents.ts",
+    "eval:report": "node --env-file-if-exists=.env.local --import ./scripts/eval/register.mjs scripts/eval/report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

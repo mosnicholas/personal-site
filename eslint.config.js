@@ -21,7 +21,7 @@ export default defineConfig([
     languageOptions: { globals: globals.browser },
   },
   {
-    files: ['api/**/*.ts', '*.config.{js,ts}'],
+    files: ['api/**/*.ts', 'scripts/**/*.{ts,mjs}', '*.config.{js,ts}'],
     languageOptions: { globals: globals.node },
   },
   prettier,

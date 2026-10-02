@@ -68,6 +68,7 @@ personal-site/
 │       ├── tagging.ts         # Haiku tagger: reuses existing tags, creates new ones when needed
 │       ├── taxonomy.ts        # `other` tag, tag normalization, cached tag list with counts and definitions
 │       └── traces.ts          # Saves every LLM call to Postgres (`llm_traces`)
+├── scripts/eval/             # Summary eval: pick documents, write candidates, judge (API or Claude Code agents), report; see its README
 ├── vite.config.ts
 ├── eslint.config.js
 ├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
@@ -133,12 +134,14 @@ npm run start:web       # Vite only, no API
 npm run build           # tsc -b (src + api) then vite build -> dist/
 npm run lint
 npm run format
+npm run eval:pick -- <run>   # then eval:summarize, eval:judge (or eval:agents), eval:report; see scripts/eval/README.md
 ```
 
 ### Verifying changes
 - `npm run build` must pass - it type-checks the frontend and the API, and Vercel runs it on deploy
 - `npm run lint` should be clean
 - No test suite
+- Before changing the summary prompt or model, run the summary eval (`scripts/eval/`) on a fresh run and compare against `stored`; it uses `summaryRequest()` from `api/_lib/summarize.ts`, so it tests the exact production request. Run data (`scripts/eval/runs/`) holds full texts and is gitignored; never commit it (the repo is public)
 
 ### Dependencies
 - `.npmrc` sets `min-release-age=7`: npm only installs versions published at least 7 days ago. Keep it.

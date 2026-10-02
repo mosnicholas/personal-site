@@ -140,6 +140,8 @@ Research done 2026-10-02. Three research agents read the 2024–2026 papers and 
 
 ## Plan
 
+The quick checks above are now scripts in [`scripts/eval/`](../../scripts/eval/README.md) (pick, summarize, judge through the API or Claude Code agents, report); the plan below extends them.
+
 Run it locally as scripts in `scripts/eval/` (TypeScript, like the rest of the repo), not as Vercel functions, so nothing is bound by the 300-second limit. Results go in new `eval_*` tables in Neon, written by a separate database role that can only write those tables, so the eval can't touch the library or the trace log. All judge calls are traced like everything else.
 
 ### 0. Decisions before starting (no spend)

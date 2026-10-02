@@ -9,6 +9,8 @@
  * tweet) are their own summary, with no model call.
  */
 
+import type Anthropic from '@anthropic-ai/sdk';
+
 import { getAnthropic } from './anthropic.js';
 import type { OurSummary } from './documents.js';
 import { tracedCall } from './traces.js';
@@ -24,12 +26,12 @@ export const MIN_TEXT_CHARS = 200;
 // Up to this length (a tweet, a short thread) the text is its own summary: it
 // reads in about a minute. Tested on 35 documents, the model's summaries of
 // posts this short ran 50-85% of their length whatever the prompt said
-const VERBATIM_MAX_WORDS = 300;
+export const VERBATIM_MAX_WORDS = 300;
 
 export const countWords = (text: string) =>
   text.split(/\s+/).filter(Boolean).length;
 
-const SYSTEM_PROMPT = `You summarize documents for a personal reading library. The reader saves far more than they can read, and uses these summaries to recall what each piece said and to decide which are worth reading in full. Models also read them to tag and connect documents. Write the summary that serves that: the main points and what supports them, specific rather than vague, and much quicker to read than the document itself.
+export const SYSTEM_PROMPT = `You summarize documents for a personal reading library. The reader saves far more than they can read, and uses these summaries to recall what each piece said and to decide which are worth reading in full. Models also read them to tag and connect documents. Write the summary that serves that: the main points and what supports them, specific rather than vague, and much quicker to read than the document itself.
 
 The reader skims, so make it easy to take in: lead with the main point, and give it whatever structure fits the content, such as short paragraphs or a list. If the text is cut off, summarize what's there and say it's partial. If it's mostly navigation, ads, or boilerplate, summarize the substance you can find.`;
 
@@ -64,21 +66,21 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-export async function summarizeDocument(
-  documentId: string,
+/**
+ * The summary request for a document. `system` is only swapped by the eval
+ * scripts (scripts/eval), to compare a prompt change on the exact request
+ */
+export function summaryRequest(
   document: SummarizableDocument,
   text: string,
-): Promise<OurSummary> {
-  if (countWords(text) <= VERBATIM_MAX_WORDS) {
-    return { summary: text.trim(), keyPoints: [] };
-  }
+  system = SYSTEM_PROMPT,
+) {
   const truncated = text.length > MAX_TEXT_CHARS;
-
-  const request = {
+  return {
     model: SUMMARY_MODEL,
     // Room for thinking plus a long summary of a long document
     max_tokens: 32000,
-    system: SYSTEM_PROMPT,
+    system,
     messages: [
       {
         role: 'user' as const,
@@ -103,7 +105,34 @@ export async function summarizeDocument(
       },
     },
   };
+}
 
+/** The summary from a response to summaryRequest */
+export function readSummary(response: Anthropic.Message): OurSummary {
+  if (
+    response.stop_reason === 'refusal' ||
+    response.stop_reason === 'max_tokens'
+  ) {
+    throw new Error(`Summary incomplete (${response.stop_reason})`);
+  }
+  const output = JSON.parse(
+    response.content
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join(''),
+  ) as { summary: string };
+  // Key points are no longer asked for: they repeated the summary
+  return { summary: output.summary.trim(), keyPoints: [] };
+}
+
+export async function summarizeDocument(
+  documentId: string,
+  document: SummarizableDocument,
+  text: string,
+): Promise<OurSummary> {
+  if (countWords(text) <= VERBATIM_MAX_WORDS) {
+    return { summary: text.trim(), keyPoints: [] };
+  }
+  const request = summaryRequest(document, text);
   return tracedCall(
     {
       kind: 'document_summary',
@@ -113,20 +142,6 @@ export async function summarizeDocument(
     },
     // Streaming keeps a long response from hitting HTTP timeouts
     () => getAnthropic().messages.stream(request).finalMessage(),
-    (response) => {
-      if (
-        response.stop_reason === 'refusal' ||
-        response.stop_reason === 'max_tokens'
-      ) {
-        throw new Error(`Summary incomplete (${response.stop_reason})`);
-      }
-      const output = JSON.parse(
-        response.content
-          .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-          .join(''),
-      ) as { summary: string };
-      // Key points are no longer asked for: they repeated the summary
-      return { summary: output.summary.trim(), keyPoints: [] };
-    },
+    readSummary,
   );
 }
