@@ -1,7 +1,8 @@
 /**
  * Our mirror of the Readwise library (the `documents` table): Readwise's
  * fields, kept fresh by the daily sync, the webhook and the rebalance, plus
- * our own summaries written from each document's full text.
+ * our own summaries, and each saved document's full text
+ * (`document_texts`).
  *
  * Readwise stays the source of truth for documents, reading state and tags;
  * the mirror lets everything else read without Readwise's 20 requests/min
@@ -103,10 +104,14 @@ export async function setDocumentTags(
     WHERE d.id = r.id`;
 }
 
+/**
+ * Store our summary; `version` (model and prompt) lets the sync redo
+ * summaries when either changes
+ */
 export async function saveDocumentSummary(
   id: string,
   { summary, keyPoints }: OurSummary,
-  model: string,
+  version: string,
 ): Promise<void> {
   const sqlPromise = getSql();
   if (!sqlPromise) return;
@@ -114,7 +119,7 @@ export async function saveDocumentSummary(
   await sql`
     UPDATE documents
     SET summary = ${summary}, key_points = ${JSON.stringify(keyPoints)}::jsonb,
-        summary_model = ${model}, summarized_at = now()
+        summary_model = ${version}, summarized_at = now()
     WHERE id = ${id}`;
 }
 
@@ -153,29 +158,103 @@ export async function ourSummaries(
 }
 
 export const MAX_SUMMARY_ATTEMPTS = 3;
+// Books can run to millions of characters; this keeps one from eating the
+// free plan's 1 GB
+const MAX_STORED_TEXT_CHARS = 1_000_000;
 
-/**
- * Saved (non-feed) documents we haven't summarized yet, newest first
- */
-export async function documentsNeedingSummary(
-  limit: number,
-): Promise<{ id: string }[]> {
-  const sql = await requireSql();
-  return (await sql`
-    SELECT id FROM documents
-    WHERE summary IS NULL AND location IS DISTINCT FROM 'feed'
-      AND summary_attempts < ${MAX_SUMMARY_ATTEMPTS}
-    ORDER BY saved_at DESC NULLS LAST
-    LIMIT ${limit}`) as { id: string }[];
+export interface DocumentToSummarize {
+  id: string;
+  title: string;
+  author: string | null;
+  site: string | null;
+  category: string;
 }
 
-export async function countDocumentsNeedingSummary(): Promise<number> {
+/**
+ * Saved (non-feed) documents without a summary from the current `version`:
+ * missing ones first, then outdated ones, newest first
+ */
+export async function documentsNeedingSummary(
+  version: string,
+  limit: number,
+): Promise<DocumentToSummarize[]> {
+  const sql = await requireSql();
+  return (await sql`
+    SELECT id, title, author, site_name AS site, category FROM documents
+    WHERE summary_model IS DISTINCT FROM ${version}
+      AND location IS DISTINCT FROM 'feed'
+      AND summary_attempts < ${MAX_SUMMARY_ATTEMPTS}
+    ORDER BY summary IS NULL DESC, saved_at DESC NULLS LAST
+    LIMIT ${limit}`) as DocumentToSummarize[];
+}
+
+export async function countDocumentsNeedingSummary(
+  version: string,
+): Promise<number> {
   const sql = await requireSql();
   const [row] = await sql`
     SELECT count(*) AS count FROM documents
-    WHERE summary IS NULL AND location IS DISTINCT FROM 'feed'
+    WHERE summary_model IS DISTINCT FROM ${version}
+      AND location IS DISTINCT FROM 'feed'
       AND summary_attempts < ${MAX_SUMMARY_ATTEMPTS}`;
   return Number(row.count);
+}
+
+export async function saveDocumentText(
+  id: string,
+  text: string,
+): Promise<void> {
+  const sqlPromise = getSql();
+  if (!sqlPromise) return;
+  const sql = await sqlPromise;
+  const stored = text.slice(0, MAX_STORED_TEXT_CHARS);
+  await sql`
+    INSERT INTO document_texts (id, text, chars, truncated, fetched_at)
+    VALUES (${id}, ${stored}, ${text.length}, ${text.length > stored.length}, now())
+    ON CONFLICT (id) DO UPDATE SET
+      text = excluded.text, chars = excluded.chars,
+      truncated = excluded.truncated, fetched_at = now()`;
+}
+
+export async function getDocumentText(id: string): Promise<string | undefined> {
+  const sql = await requireSql();
+  const [row] = await sql`SELECT text FROM document_texts WHERE id = ${id}`;
+  return row?.text as string | undefined;
+}
+
+/**
+ * Full texts for as many of these documents as fit in `budgetChars`,
+ * shortest first, so the most documents come with their text; the rest are
+ * left to their summaries
+ */
+export async function documentTexts(
+  ids: string[],
+  budgetChars: number,
+): Promise<Map<string, string>> {
+  const texts = new Map<string, string>();
+  const sqlPromise = getSql();
+  if (!sqlPromise || ids.length === 0) return texts;
+  try {
+    const sql = await sqlPromise;
+    const sizes = await sql`
+      SELECT id, length(text) AS chars FROM document_texts
+      WHERE id = ANY(${ids}) ORDER BY length(text), id`;
+    const chosen: string[] = [];
+    let used = 0;
+    for (const row of sizes) {
+      const chars = Number(row.chars);
+      if (used + chars > budgetChars) break;
+      used += chars;
+      chosen.push(row.id as string);
+    }
+    if (chosen.length === 0) return texts;
+    const rows = await sql`
+      SELECT id, text FROM document_texts WHERE id = ANY(${chosen})`;
+    for (const row of rows) texts.set(row.id as string, row.text as string);
+  } catch (error) {
+    console.warn('Could not load document texts:', error);
+  }
+  return texts;
 }
 
 export interface TagInUse {

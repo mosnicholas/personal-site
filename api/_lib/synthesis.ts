@@ -17,8 +17,11 @@ const MAX_OUTPUT_TOKENS = 20000;
 const MAX_SUMMARY_CHARS = 600;
 const MAX_HIGHLIGHTS_PER_DOCUMENT = 5;
 const MAX_HIGHLIGHT_CHARS = 400;
+// Full texts included alongside summaries, shortest documents first: about
+// 120k tokens, which keeps a quarter's synthesis inside the 300s limit
+export const SYNTHESIS_TEXT_BUDGET_CHARS = 480_000;
 
-const SYSTEM_PROMPT = `You write a reading synthesis for one reader: nimo, founder and CEO of Junior (myjunior.ai), an AI startup, who also loves adventure travel and cooking. You get every document they saved to Readwise Reader over a stretch of time: title, source, date saved, tags, a summary with key points, how far they got, and any notes and highlights. They saved far more than they read, so this email has to tell them what the documents say without reading them, and then step back and think about the reading itself.
+const SYSTEM_PROMPT = `You write a reading synthesis for one reader: nimo, founder and CEO of Junior (myjunior.ai), an AI startup, who also loves adventure travel and cooking. You get every document they saved to Readwise Reader over a stretch of time: title, source, date saved, tags, a summary with key points, how far they got, any notes and highlights, and for as many documents as fit, the full text. They saved far more than they read, so this email has to tell them what the documents say without reading them, and then step back and think about the reading itself.
 
 Write to the reader directly, as "you", in these sections:
 
@@ -29,7 +32,7 @@ Write to the reader directly, as "you", in these sections:
 5. **Worth reading in full** - 5 to 10 documents they haven't finished, each with a sentence on why.
 6. **Questions to sit with** - 3 to 5.
 
-Ground claims in the summaries, notes, and highlights you're given, and say so when a summary is too thin to judge a document. Highlights and notes show what the reader found important; weigh them. Link a document by putting its title in an <a> tag with its \`link\`. Aim for about 3,000 words.
+Ground claims in what you're given. Where a document includes its full \`text\`, read that rather than relying on its summary; otherwise work from the summary and key points, and say so when one is too thin to judge a document. Highlights and notes show what the reader found important; weigh them. Link a document by putting its title in an <a> tag with its \`link\`. Aim for about 3,000 words.
 
 Format: start with the subject line on its own line, as SUBJECT: <subject>, then clean HTML for email using <h2>, <h3>, <p>, <ul>, <li>, <strong>, <em>, and <a>. No code fences.`;
 
@@ -44,6 +47,7 @@ interface SynthesisDocument {
   tags: string[];
   summary: string | null;
   key_points?: string[];
+  text?: string;
   note?: string;
   highlights?: { text?: string; note?: string }[];
 }
@@ -66,6 +70,7 @@ export function prepareDocuments(
   documents: Article[],
   highlights: Article[],
   summaries: Map<string, OurSummary>,
+  texts: Map<string, string>,
 ): SynthesisDocument[] {
   const highlightsByDocument = new Map<string, Article[]>();
   for (const highlight of highlights) {
@@ -100,6 +105,7 @@ export function prepareDocuments(
           truncate(doc.summary, MAX_SUMMARY_CHARS) ??
           null,
         key_points: summaries.get(doc.id)?.keyPoints,
+        text: texts.get(doc.id),
         note: truncate(doc.notes, MAX_HIGHLIGHT_CHARS),
         highlights: docHighlights.length > 0 ? docHighlights : undefined,
       };

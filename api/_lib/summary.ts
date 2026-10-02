@@ -8,6 +8,9 @@ import { getAnthropic } from './anthropic.js';
 import { tracedCall } from './traces.js';
 
 const SUMMARY_MODEL = 'claude-opus-5-5';
+// Full texts included alongside summaries, shortest documents first (about
+// 100k tokens)
+export const WEEKLY_TEXT_BUDGET_CHARS = 400_000;
 
 export interface WeeklySummaryResult {
   html: string;
@@ -27,6 +30,8 @@ export async function generateWeeklySummary(
     url: string;
     summary: string | null;
     keyPoints?: string[];
+    /** The full text, when it fits in WEEKLY_TEXT_BUDGET_CHARS */
+    text?: string;
     tags: Record<string, unknown>;
     reading_progress: number;
   }[],
@@ -49,7 +54,9 @@ Your analysis should be comprehensive and include these 10 sections:
 Format your response as clean HTML suitable for email. Use semantic tags like <h2>, <ul>, <li>, <p>, <strong>, <em>.
 Include a compelling email subject line at the very start, formatted as: SUBJECT: Your subject here
 
-Then provide the HTML content.`;
+Then provide the HTML content.
+
+Where an article includes its full text, read that rather than relying on its summary.`;
 
   const articleList = articles
     .map(
@@ -58,7 +65,7 @@ Then provide the HTML content.`;
    URL: ${a.url}
    Progress: ${Math.round(a.reading_progress * 100)}%
    Summary: ${a.summary ?? 'No summary'}${a.keyPoints?.length ? `\n   Key points: ${a.keyPoints.join(' | ')}` : ''}
-   Tags: ${Object.keys(a.tags).join(', ') || 'None'}`,
+   Tags: ${Object.keys(a.tags).join(', ') || 'None'}${a.text ? `\n   Full text:\n<<<\n${a.text}\n>>>` : ''}`,
     )
     .join('\n\n');
 

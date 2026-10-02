@@ -41,10 +41,10 @@ const TagPanel = ({ tag, cluster, onClose }: TagPanelProps) => {
         <div className="panel-intro">
           <h2 className="reading-heading">about</h2>
           <p>
-            Everything I save to Readwise Reader gets summarized and tagged by
-            Claude as it arrives. Once a week, Claude tidies the tags, groups
-            them into clusters, defines each one, and writes a short brief of
-            what the documents under it say.
+            Everything I save to Readwise Reader gets summarized and tagged as
+            it arrives. Once a week, the tags get tidied, grouped into clusters
+            and defined, and each one gets a short brief of what the documents
+            under it say.
           </p>
           <p>Pick a tag on the map to read its brief and documents.</p>
         </div>

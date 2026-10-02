@@ -1,11 +1,12 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
-import { ourSummaries } from './_lib/documents.js';
+import { documentTexts, ourSummaries } from './_lib/documents.js';
 import { sendReadingEmail } from './_lib/email.js';
 import { type Article, fetchArticles, type Location } from './_lib/readwise.js';
 import {
   buildSynthesisRequest,
   generateSynthesis,
   prepareDocuments,
+  SYNTHESIS_TEXT_BUDGET_CHARS,
 } from './_lib/synthesis.js';
 
 /**
@@ -79,10 +80,12 @@ export default {
         console.warn('Could not load highlights:', error);
       }
 
+      const ids = documents.map((doc) => doc.id);
       const prepared = prepareDocuments(
         documents,
         highlights,
-        await ourSummaries(documents.map((doc) => doc.id)),
+        await ourSummaries(ids),
+        await documentTexts(ids, SYNTHESIS_TEXT_BUDGET_CHARS),
       );
       const synthesisRequest = buildSynthesisRequest(prepared, since, until);
       const inputChars =
@@ -111,6 +114,7 @@ export default {
           days,
           documents: prepared.length,
           withHighlights: prepared.filter((doc) => doc.highlights).length,
+          withFullText: prepared.filter((doc) => doc.text).length,
           byMonth,
           byStatus,
           approxInputTokens: Math.round(inputChars / 4),

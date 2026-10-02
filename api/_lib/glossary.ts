@@ -199,7 +199,8 @@ export async function defineTags({ force = false } = {}): Promise<
 
 /**
  * Write briefs for tags with enough saved documents whose document count
- * changed since their last brief, biggest first
+ * changed, or whose documents were (re)summarized, since their last brief,
+ * biggest first
  */
 export async function writeBriefs(
   deadline: number,
@@ -210,9 +211,10 @@ export async function writeBriefs(
     FROM tags t
     JOIN documents d
       ON t.name = ANY(d.tags) AND d.location IS DISTINCT FROM 'feed'
-    GROUP BY t.name, t.definition, t.brief_documents
+    GROUP BY t.name, t.definition, t.brief_documents, t.briefed_at
     HAVING count(d.id) >= ${MIN_DOCUMENTS_FOR_BRIEF}
-      AND t.brief_documents IS DISTINCT FROM count(d.id)
+      AND (t.brief_documents IS DISTINCT FROM count(d.id)
+        OR max(d.summarized_at) > t.briefed_at)
     ORDER BY count(d.id) DESC, t.name`;
 
   let written = 0;

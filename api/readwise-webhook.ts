@@ -2,6 +2,7 @@ import { secretsMatch } from './_lib/auth.js';
 import {
   type OurSummary,
   saveDocumentSummary,
+  saveDocumentText,
   setDocumentTags,
   upsertDocuments,
 } from './_lib/documents.js';
@@ -9,7 +10,7 @@ import { fetchArticle, updateDocument } from './_lib/readwise.js';
 import {
   htmlToText,
   MIN_TEXT_CHARS,
-  SUMMARY_MODEL,
+  SUMMARY_VERSION,
   summarizeDocument,
 } from './_lib/summarize.js';
 import { classifyDocument } from './_lib/tagging.js';
@@ -123,6 +124,7 @@ export default {
         text.length >= MIN_TEXT_CHARS
       ) {
         try {
+          await saveDocumentText(payload.id, text);
           ours = await summarizeDocument(
             payload.id,
             {
@@ -133,7 +135,7 @@ export default {
             },
             text,
           );
-          await saveDocumentSummary(payload.id, ours, SUMMARY_MODEL);
+          await saveDocumentSummary(payload.id, ours, SUMMARY_VERSION);
         } catch (summaryError) {
           // The daily sync tries again; tag from Readwise's summary for now
           console.warn('Could not summarize the article:', summaryError);

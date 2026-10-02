@@ -13,8 +13,8 @@ Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Four parts:
 - **Vite 8** for dev server and build (migrated from the deprecated Create React App)
 - **Vercel** for hosting; `/api/*.ts` are Vercel Functions
 - **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
-- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat, document summaries and tagging, `claude-sonnet-5-5` for tag briefs, `claude-opus-5-5` for the weekly tag rebalance, glossary and summary, and the monthly synthesis
-- **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log, the library mirror with our summaries, and the tag glossary
+- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and tagging, `claude-sonnet-5-5` for document summaries and tag briefs, `claude-opus-5-5` for the weekly tag rebalance, glossary and summary, and the monthly synthesis
+- **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log, the library mirror with each saved document's full text and our summary, and the tag glossary
 - **Resend** for email (personal account, `nimo.fyi` verified; sender `reader@nimo.fyi`, recipient `WEEKLY_SUMMARY_RECIPIENT_EMAIL`)
 - ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
 
@@ -51,14 +51,14 @@ personal-site/
 │       ├── anthropic.ts       # Shared Anthropic client (checks ANTHROPIC_API_KEY)
 │       ├── auth.ts            # Constant-time secret comparison, cron auth
 │       ├── db.ts              # Shared Neon client; creates all tables on first use
-│       ├── documents.ts       # The `documents` mirror: upserts, our summaries, tag counts, sync state
+│       ├── documents.ts       # The mirror: `documents` (upserts, our summaries, tag counts), `document_texts`, sync state
 │       ├── email.ts           # Resend client
 │       ├── glossary.ts        # Opus definitions + clusters, Sonnet tag briefs (`tags` table)
 │       ├── graph.ts           # Queries behind /api/reading-graph
 │       ├── rate-limit.ts      # In-memory per-instance rate limiter for /api/chat
 │       ├── readwise.ts        # Readwise Reader v3 client (list, tags, bulk update)
 │       ├── rebalance.ts       # Weekly rebalance: sweep, Opus plan, bulk rewrite
-│       ├── summarize.ts       # Our document summaries (Haiku 4.5, full text) + HTML to text
+│       ├── summarize.ts       # Our document summaries (Sonnet 5.5, full text, length set by the document) + HTML to text
 │       ├── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming); parses SUBJECT + HTML
 │       ├── sync.ts            # Resumable library listing and summary backfill
 │       ├── synthesis.ts       # Monthly/one-off synthesis prompt and request (Opus 5.5)
@@ -88,12 +88,14 @@ personal-site/
 ### Library mirror and our summaries
 - Readwise is the source of truth for documents, reading state and tags; Postgres keeps a mirror (`documents`) so everything else can read without Readwise's 20 requests/min limit
 - The mirror is kept fresh by the daily sync (resumable listing from the last complete sync, page cursor in `sync_state`), the webhook (upserts on save) and the rebalance (writes tags it applied)
-- Our summaries (`summary`, `key_points`) are written by Haiku 4.5 from the full text (`withHtmlContent`, ~40k chars max) for saved documents only, not feed items (cost). The webhook writes one on save when the text is ready; the sync fills in the rest, 3 attempts per document. Every consumer prefers ours and falls back to Readwise's summary
+- Each saved document's full text (HTML from `withHtmlContent`, converted to plain text, up to 1M chars) is stored in `document_texts`, apart from `documents` so its queries stay light. Feed items get neither text nor our summary (cost)
+- Our summaries (`summary`, `key_points`) are written by Sonnet 5.5 at `medium` effort from the stored text (up to 600k chars). Length follows the document: a few sentences for a short post, several paragraphs for a long report. `summary_model` stores `SUMMARY_VERSION` (model + prompt version); the sync redoes any summary from an older version, from the stored text, so bump the version when changing the prompt or model. The webhook writes one on save when the text is ready; the sync fills in the rest, 3 attempts per document
+- Consumers: the weekly summary and the synthesis get full texts within a character budget (`WEEKLY_TEXT_BUDGET_CHARS`, `SYNTHESIS_TEXT_BUDGET_CHARS`; shortest documents first) and our summaries for the rest; tagging, the rebalance and tag briefs use our summaries. Every consumer falls back to Readwise's summary
 
 ### Tag taxonomy (knowledge graph)
 - Readwise is the source of truth: the taxonomy is the set of tags in use, normalized to lowercase kebab-case
 - The taxonomy is still being created, so the save-time tagger (Haiku 4.5) may create tags: it sees every existing tag as `name (documents): definition` (from the mirror and the glossary), is told to reuse them, and creates one only when none covers a main topic. `other` is for documents it can't place. Don't swap in a closed-set classifier (decision models like Jev) while tags are still being created
-- Weekly glossary (`tag-glossary.ts`, after the rebalance): Opus 5.5 at `low` effort defines every tag used by 2+ documents (top 250, to stay inside 300s) in at most 15 words and sorts them into 6-12 named clusters, keeping last week's unless wrong; it's skipped if under 6 days old (`?redefine=true` forces it). Sonnet 5.5 writes a public brief for each tag with 3+ saved documents whose count changed
+- Weekly glossary (`tag-glossary.ts`, after the rebalance): Opus 5.5 at `low` effort defines every tag used by 2+ documents (top 250, to stay inside 300s) in at most 15 words and sorts them into 6-12 named clusters, keeping last week's unless wrong; it's skipped if under 6 days old (`?redefine=true` forces it). Sonnet 5.5 writes a public brief for each tag with 3+ saved documents whose count changed or whose documents were resummarized since
 - Weekly, Opus 5.5 returns a structured plan (`merges`, `other_documents`), merging synonyms and one-off tags (used by 1-2 documents) into the tag that covers them; code validates it (no merging into/out of `other`, only known tags and documents) and rewrites tags with Readwise's bulk update
 - Earlier runs' merges (`loadAppliedRenames()`, read from rebalance traces, newest wins) are passed to Opus as `earlier_merges`, applied to returning retired tags, and used to resolve plan targets, so a plan can't reverse an earlier merge
 
@@ -109,7 +111,7 @@ personal-site/
 - `readwise-webhook.ts`: only handles `*document.created` events to avoid loops (anything else gets a 200 `skipped`, no secret needed); acts only with a matching `READWISE_WEBHOOK_SECRET` (Readwise sends it as `secret` in the body), and answers 200 without acting while it's unset, because Readwise won't create the webhook (and reveal the secret) until its endpoint test passes; tags the document via `classifyDocument` against the current taxonomy and replaces its tags (the user never tags by hand)
 - `rebalance-tags.ts`: same cron auth; `?days=` (default 8) sets how far back to look for untagged documents, so a big value backfills. Applies changes directly, no review step. Works within a ~220s time budget and reports `incomplete` if it stopped early; it's idempotent, so the next run continues. The sweep lists each location a page at a time (library first, then the feed, which can hold thousands of items against a 20 requests/min limit), tags as it goes, and skips the Opus plan until nothing is left untagged
 - `weekly-summary.ts`: requires `Authorization: Bearer $CRON_SECRET` (Vercel cron sends this; `rejectUnauthorizedCron` in `_lib/auth.ts`); `?days=` (1-31), `?email=false`, `?save=false` for manual runs. It summarizes documents saved or opened in the window, not everything updated: rewriting tags can bump `updated_at` on old documents. The summary is written by Claude Opus 5.5 at `medium` effort with server-side refusal fallbacks (`fallbacks: "default"`)
-- `sync-documents.ts`: same cron auth; ~220s budget, half for listing; `?summarize=false` lists only. Reports `incomplete` until the listing is caught up and no saved document lacks a summary
+- `sync-documents.ts`: same cron auth; ~220s budget, half for listing; `?summarize=false` lists only. Reports `incomplete` until the listing is caught up and every saved document has a summary from the current version
 - `tag-glossary.ts`: same cron auth; definitions, then briefs until the budget runs out (`incomplete` while briefs remain)
 - `reading-graph.ts`: public, no auth, `Cache-Control: s-maxage=3600, stale-while-revalidate=86400`. Without params: tags on 2+ saved documents (count, cluster, definition), clusters, edges (tag pairs sharing 2+ documents), 52-week timeline by cluster. `?tag=<name>`: definition, brief, up to 200 documents (title, site, original URL, saved date). Saved documents only, never reading state
 - `reading-synthesis.ts`: same cron auth; `?days=` (default 90, so each monthly email covers a quarter; max 183), `?email=false`, `?dry_run=true` (counts and approximate input tokens, no model call). Covers documents saved to the library (`new`, `later`, `shortlist`, `archive`) in the window, with their highlights; one Opus 5.5 call at `medium` effort writes themes, change over time, meta observations, what to read, and questions. It must finish within 300s, so the prompt asks for ~3,000 words

@@ -1,8 +1,11 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
-import { ourSummaries } from './_lib/documents.js';
+import { documentTexts, ourSummaries } from './_lib/documents.js';
 import { sendReadingEmail } from './_lib/email.js';
 import { fetchArticles, saveDocument } from './_lib/readwise.js';
-import { generateWeeklySummary } from './_lib/summary.js';
+import {
+  generateWeeklySummary,
+  WEEKLY_TEXT_BUDGET_CHARS,
+} from './_lib/summary.js';
 import { describeTraceStorage } from './_lib/traces.js';
 
 /**
@@ -80,8 +83,10 @@ export default {
         });
       }
 
-      // Our summaries (from the full text) where we have them
-      const ours = await ourSummaries(articlesToSummarize.map((a) => a.id));
+      // Our summaries where we have them, and full texts as far as they fit
+      const ids = articlesToSummarize.map((a) => a.id);
+      const ours = await ourSummaries(ids);
+      const texts = await documentTexts(ids, WEEKLY_TEXT_BUDGET_CHARS);
       const summary = await generateWeeklySummary(
         articlesToSummarize.map((a) => ({
           id: a.id,
@@ -90,6 +95,7 @@ export default {
           url: a.url,
           summary: ours.get(a.id)?.summary ?? a.summary,
           keyPoints: ours.get(a.id)?.keyPoints,
+          text: texts.get(a.id),
           tags: a.tags,
           reading_progress: a.reading_progress,
         })),

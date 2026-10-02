@@ -1,8 +1,8 @@
 /**
  * Postgres (Neon's free plan via the Vercel Marketplace, which sets
  * DATABASE_URL). Holds the LLM trace log, a mirror of the Readwise library
- * with our own summaries, and the tag glossary. Tables are created on first
- * use, so there's no migration step.
+ * with each saved document's text and our summary, and the tag glossary.
+ * Tables are created on first use, so there's no migration step.
  */
 
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
@@ -83,6 +83,18 @@ async function createSchema(sql: Sql): Promise<Sql> {
     )`;
   await sql`CREATE INDEX IF NOT EXISTS documents_tags ON documents USING gin (tags)`;
   await sql`CREATE INDEX IF NOT EXISTS documents_saved_at ON documents (saved_at)`;
+
+  // Full text of saved documents, kept apart so queries on `documents` stay
+  // light; used for summaries and the emails, and to redo summaries without
+  // asking Readwise again
+  await sql`
+    CREATE TABLE IF NOT EXISTS document_texts (
+      id text PRIMARY KEY,
+      text text NOT NULL,
+      chars integer NOT NULL,
+      truncated boolean NOT NULL DEFAULT false,
+      fetched_at timestamptz NOT NULL DEFAULT now()
+    )`;
 
   // The glossary: a definition and cluster per tag (Opus, weekly), and a brief
   // on what the documents under it say (Sonnet, when the tag has grown)

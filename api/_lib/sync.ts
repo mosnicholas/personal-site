@@ -7,9 +7,11 @@
 import {
   countDocumentsNeedingSummary,
   documentsNeedingSummary,
+  getDocumentText,
   getSyncState,
   recordSummaryFailure,
   saveDocumentSummary,
+  saveDocumentText,
   setSyncState,
   upsertDocuments,
 } from './documents.js';
@@ -17,15 +19,16 @@ import { fetchArticle, fetchArticlePage } from './readwise.js';
 import {
   htmlToText,
   MIN_TEXT_CHARS,
-  SUMMARY_MODEL,
+  SUMMARY_VERSION,
   summarizeDocument,
 } from './summarize.js';
 
 const SYNC_STATE = 'documents';
 // Re-list a little before the last sync started, in case of clock skew
 const OVERLAP_MS = 10 * 60_000;
-// Readwise allows 20 list requests a minute, and each summary needs one
-const SUMMARY_CONCURRENCY = 4;
+// Readwise allows 20 list requests a minute, and a document whose text we
+// don't have yet needs one
+const SUMMARY_CONCURRENCY = 5;
 
 interface SyncState {
   /** When the last complete listing started; the next one lists from here */
@@ -86,7 +89,9 @@ export async function syncDocuments(
 }
 
 /**
- * Summarize saved documents that don't have our summary yet, newest first
+ * Summarize saved documents that don't have a summary from the current
+ * SUMMARY_VERSION (missing first, then outdated), from their stored text,
+ * fetching and storing it first if needed
  */
 export async function summarizeMissing(deadline: number): Promise<{
   summarized: number;
@@ -99,32 +104,30 @@ export async function summarizeMissing(deadline: number): Promise<{
 
   while (Date.now() < deadline) {
     const batch = (
-      await documentsNeedingSummary(SUMMARY_CONCURRENCY + tried.size)
+      await documentsNeedingSummary(
+        SUMMARY_VERSION,
+        SUMMARY_CONCURRENCY + tried.size,
+      )
     ).filter(({ id }) => !tried.has(id));
     if (batch.length === 0) break;
 
     await Promise.all(
-      batch.slice(0, SUMMARY_CONCURRENCY).map(async ({ id }) => {
+      batch.slice(0, SUMMARY_CONCURRENCY).map(async (document) => {
+        const { id } = document;
         tried.add(id);
         try {
-          const article = await fetchArticle(id, { withHtmlContent: true });
-          const text = htmlToText(article?.html_content ?? '');
-          if (!article || text.length < MIN_TEXT_CHARS) {
-            throw new Error(
-              article ? `only ${text.length} characters of text` : 'not found',
-            );
+          let text = await getDocumentText(id);
+          if (!text) {
+            const article = await fetchArticle(id, { withHtmlContent: true });
+            if (!article) throw new Error('not found');
+            text = htmlToText(article.html_content ?? '');
+            if (text.length >= MIN_TEXT_CHARS) await saveDocumentText(id, text);
           }
-          const summary = await summarizeDocument(
-            id,
-            {
-              title: article.title,
-              author: article.author,
-              site: article.site_name,
-              category: article.category,
-            },
-            text,
-          );
-          await saveDocumentSummary(id, summary, SUMMARY_MODEL);
+          if (text.length < MIN_TEXT_CHARS) {
+            throw new Error(`only ${text.length} characters of text`);
+          }
+          const summary = await summarizeDocument(id, document, text);
+          await saveDocumentSummary(id, summary, SUMMARY_VERSION);
           summarized += 1;
         } catch (error) {
           console.warn(`Could not summarize ${id}:`, error);
@@ -138,6 +141,6 @@ export async function summarizeMissing(deadline: number): Promise<{
   return {
     summarized,
     failed,
-    remaining: await countDocumentsNeedingSummary(),
+    remaining: await countDocumentsNeedingSummary(SUMMARY_VERSION),
   };
 }

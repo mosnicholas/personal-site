@@ -68,13 +68,14 @@ The endpoint has to be live in production first (step 3).
 
 Readwise stays the source of truth, and Postgres keeps a mirror of the library (`documents`) so the tagger, the emails and `/reading` don't hit Readwise's 20 requests/min limit.
 
-- **Daily** (`/api/sync-documents`, 6am UTC): copies documents that changed in Readwise into the mirror, then has Claude Haiku 4.5 summarize saved documents that don't have our summary yet, from their full text (2-4 sentences plus key points). Feed items keep Readwise's summary.
+- **Daily** (`/api/sync-documents`, 6am UTC): copies documents that changed in Readwise into the mirror, stores each saved document's full text (`document_texts`), and has Claude Sonnet 5.5 summarize documents that don't have a current summary. Summaries are as long as the document needs, plus its key points. Feed items keep Readwise's summary and aren't stored in full.
+- **Changing the summary prompt or model**: bump `SUMMARY_VERSION` in `api/_lib/summarize.ts`; the daily sync then redoes every summary from the stored text, about 70 a run (run it by hand to go faster), and the next glossary run refreshes the tag briefs.
 - **On save**: the webhook writes our summary straight away when Readwise has the text ready; otherwise the next daily sync does.
 - **Backfill**: the first sync lists the whole library and summarizes it over several runs. Run it until `incomplete` is false (`?summarize=false` lists only, to see the size first):
   ```bash
   curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-domain>/api/sync-documents"
   ```
-  Summaries cost about a cent per document (Haiku 4.5, up to ~10k tokens of text each).
+  Summaries cost a few cents per document (Sonnet 5.5 reads the whole text, up to ~150k tokens). Texts take roughly 25 KB per document of the 1 GB.
 
 ## Tagging and the knowledge graph
 
@@ -103,7 +104,7 @@ ORDER BY r.created_at, title;
 
 ## Reading synthesis
 
-`/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 90 days, so each month's email shows the longer arc (`?days=` from 1 to 183 for a one-off over another window). The first one, over 92 days with 89 documents, took about 3 minutes. Claude Opus 5.5 gets each document's title, source, date, tags, our summary and key points (Readwise's where we don't have one), how far you got, and your notes and highlights, and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
+`/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 90 days, so each month's email shows the longer arc (`?days=` from 1 to 183 for a one-off over another window). The first one, over 92 days with 89 documents, took about 3 minutes. Claude Opus 5.5 gets each document's title, source, date, tags, our summary and key points (Readwise's where we don't have one), how far you got, your notes and highlights, and the full text of as many documents as fit in about 120k tokens (shortest first), and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
 
 ## LLM trace log (Neon Postgres, free)
 
@@ -156,8 +157,8 @@ Visit `http://localhost:3000?mode=terminal`.
 personal-site/
 ├── api/
 │   ├── chat.ts              # Terminal chat (Claude Haiku 4.5, rate limited)
-│   ├── readwise-webhook.ts  # Summarizes and tags new Readwise documents (Haiku 4.5)
-│   ├── sync-documents.ts    # Daily library mirror + summary backfill (Haiku 4.5)
+│   ├── readwise-webhook.ts  # Stores, summarizes (Sonnet 5.5) and tags (Haiku 4.5) new documents
+│   ├── sync-documents.ts    # Daily library mirror, full texts, summary backfill (Sonnet 5.5)
 │   ├── rebalance-tags.ts    # Weekly taxonomy rebalance cron (Opus 5.5)
 │   ├── tag-glossary.ts      # Weekly tag definitions, clusters (Opus 5.5) and briefs (Sonnet 5.5)
 │   ├── weekly-summary.ts    # Weekly reading summary cron (Opus 5.5)
@@ -190,7 +191,7 @@ Edit `MODEL` in `api/chat.ts` (currently `claude-haiku-4-5`). Model list: https:
 Edit the `SYSTEM_PROMPT` constant in `api/chat.ts`.
 
 ### Change the reading models
-- Document summaries: `SUMMARY_MODEL` and `SYSTEM_PROMPT` in `api/_lib/summarize.ts`
+- Document summaries: `SUMMARY_MODEL`, `SUMMARY_VERSION` and `SYSTEM_PROMPT` in `api/_lib/summarize.ts`
 - Tagging: `TAGGING_MODEL`, `MAX_TAGS`, and the tagging rules in `SYSTEM_PROMPT` in `api/_lib/tagging.ts`
 - Glossary and briefs: `GLOSSARY_MODEL`, `BRIEF_MODEL` and their prompts in `api/_lib/glossary.ts`
 - Rebalance: `PLAN_MODEL` and the taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
