@@ -11,7 +11,7 @@
   --reading-hairline: #161616;
   --reading-surface: #0a0a0a;
 
-  max-width: 1480px;
+  max-width: 1520px;
   min-height: 100vh;
   margin: 0 auto;
   padding: 32px 48px 72px;
@@ -155,7 +155,8 @@
 @media (min-width: 1100px) {
   .reading-body {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 340px;
+    /* Wide enough to read a brief comfortably */
+    grid-template-columns: minmax(0, 1fr) clamp(360px, 28vw, 440px);
     gap: 40px;
     align-items: start;
   }
@@ -593,7 +594,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(420px, 92vw);
+    width: min(460px, 92vw);
     overflow-y: auto;
     border-width: 0 0 0 1px;
     border-color: var(--reading-line);
