@@ -7,7 +7,7 @@ The site deploys to Vercel: the Vite build is served as static files and everyth
 ### 1. Import the repo
 1. Go to [vercel.com](https://vercel.com) and click "Add New Project"
 2. Import the `personal-site` repository
-3. `vercel.json` sets the framework to Vite (build output goes to `dist`), turns on Fluid compute, and gives the two cron functions 300s
+3. `vercel.json` sets the framework to Vite (build output goes to `dist`), and turns on Fluid compute, which gives functions up to 300s
 
 ### 2. Set Environment Variables
 In Vercel project settings, add these for Production (and Preview if you want the features there):
@@ -123,7 +123,7 @@ personal-site/
 │   └── _lib/                # Shared helpers (underscore = not deployed as functions)
 ├── src/                     # React app
 ├── index.html               # Vite entry
-├── vercel.json              # Framework, Fluid compute, function limits, crons
+├── vercel.json              # Framework, Fluid compute, crons
 └── package.json
 ```
 
@@ -151,4 +151,4 @@ Edit the `SYSTEM_PROMPT` constant in `api/chat.ts`.
 - Rebalance: `PLAN_MODEL` and the taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
 - Weekly summary: `SUMMARY_MODEL` in `api/_lib/summary.ts` (Claude via the Anthropic SDK)
 
-The weekly summary and rebalance stream long Opus responses and can take a couple of minutes. Without Fluid compute, Hobby functions stop after 10s (this project predates Fluid compute, so it was off), so `vercel.json` sets `"fluid": true` and `maxDuration: 300` for both crons, Hobby's maximum.
+The weekly summary and rebalance stream long Opus responses and can take a couple of minutes. Without Fluid compute, Hobby functions stop after 10s (this project predates Fluid compute, so it was off), so `vercel.json` sets `"fluid": true`, which raises the default to 300s, Hobby's maximum. (Setting `maxDuration: 300` per function as well fails the deploy with "invalid maxDuration for plan".)

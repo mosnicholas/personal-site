@@ -2,10 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "fluid": true,
-  "functions": {
-    "api/rebalance-tags.ts": { "maxDuration": 300 },
-    "api/weekly-summary.ts": { "maxDuration": 300 }
-  },
   "crons": [
     {
       "path": "/api/rebalance-tags",

@@ -55,7 +55,7 @@ personal-site/
 ├── vite.config.ts
 ├── eslint.config.js
 ├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
-├── vercel.json                # framework: vite, fluid: true, 300s for the crons, crons
+├── vercel.json                # framework: vite, fluid: true (300s functions), crons
 └── .npmrc                     # min-release-age=7
 ```
 
