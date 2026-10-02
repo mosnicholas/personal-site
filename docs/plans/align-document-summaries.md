@@ -67,7 +67,16 @@ Total output fell to 44% of `/2`. Adding the document's word count to the input 
 | Summaries with an unsupported statement | 42% | 30% | 33% |
 | Readability (1-5) | 3.8 | 2.9 | 4.9 |
 
-`/5` vs `/4`: coverage +4 points (95% CI +2 to +6), readability +2.0 (+1.8 to +2.2). `/4` vs `/2`: coverage -6 points (-9 to -4). Most flagged statements in `/5` were small: facts from outside the document (an author's name or title) or overreach. One was a real error (it swapped which of two PRs was merged). The planned second judge, Claude Fable 5.1, wasn't available on this API key: it needs data retention enabled on the workspace.
+`/5` vs `/4`: coverage +4 points (95% CI +2 to +6), readability +2.0 (+1.8 to +2.2). `/4` vs `/2`: coverage -6 points (-9 to -4). Most flagged statements in `/5` were small: facts from outside the document (an author's name or title) or overreach. One was a real error (it swapped which of two PRs was merged). Fable 5.1 isn't available on this API key (it needs data retention enabled on the workspace), so it judged separately through Claude Code subagents: four agents listed key points from the source files alone, then five scored the three versions with labels shuffled per document (A/B/C), each against the document and Fable's key points.
+
+| Fable 5.1 | `/2` | `/4` | `/5` |
+| - | - | - | - |
+| Key points covered | 98% | 94% | 96% |
+| Essential points missed | 0 | 0 | 0 |
+| Summaries with an unsupported statement | 33% | 24% | 21% |
+| Readability (1-5) | 3.0 | 2.4 | 4.9 |
+
+`/5` vs `/4`: coverage +3 points (+1 to +5), readability +2.5. `/5` vs `/2`: coverage -2 (-3 to -1), readability +1.9. The judges agreed on readability (r = 0.88, within one point on 99% of summaries, same most readable version on 32 of 33 documents) and moderately on coverage (r = 0.58, since each scored against its own key points). Both caught the same real error in `/5` (which pull request was merged); `/2` had the most serious misreadings (e.g. three wrong claims about the vitamin D meta-analyses). Unlike the Opus run, Fable saw all three summaries of a document in one session, though it was told to grade each on its own.
 
 Caveats: one judge, from the same family as the summarizer (all three candidates are Sonnet, so that bias shouldn't favor one version), coverage measured against that judge's own key points, and judges are known to favor Markdown formatting, which may inflate `/5`'s readability score. Cost $4.83. The eval should confirm this didn't cost faithfulness or coverage: compression is exactly where those trade off.
 
