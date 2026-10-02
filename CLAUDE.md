@@ -1,380 +1,115 @@
 # Personal Site - Code Structure & Context
 
 ## Project Overview
-A minimal landing page for Nicholas Moschopoulos (nimo) featuring a text scrambler animation with glitch effects. Built with React 19, TypeScript, and vanilla CSS.
+Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Three parts:
 
-**Current State**: Ultra-minimal single landing page with scrambler animation and streaming subtitle.
-**Previous State**: Full site with multiple routes (NFTs, Investing, Photos, Connect, About) and Chakra UI - all removed.
+1. **Landing page** - "nicholas moschopoulos" scrambles in, becomes a glitching "nimo", and the tagline streams in like an LLM response.
+2. **Terminal mode** (`?mode=terminal`, or press `~`/`t` on the landing page) - retro boot sequence, then a chat with a Claude-powered assistant about nimo.
+3. **Reading workflows** (migrated from n8n) - a Readwise webhook that auto-tags new documents, and a weekly cron that emails an AI summary of the week's reading.
 
 ## Tech Stack
-- **React 19.2.0** - Latest UI framework (upgraded from 17)
-- **TypeScript 5.9.3** - Latest with strict type safety (upgraded from 4.4)
-- **Vanilla CSS** - No UI framework (removed Chakra UI for simplicity)
-- **Create React App 5.0.0** - Build tooling
-- **Node 22.21.0** - Runtime (specified in .nvmrc)
-- **Yarn 1.22.22** - Package manager
+- **React 19.3** + **TypeScript 6.0** (strict), vanilla CSS
+- **Vite 8** for dev server and build (migrated from the deprecated Create React App)
+- **Vercel** for hosting; `/api/*.ts` are Vercel Functions
+- **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
+- **Anthropic SDK**: `claude-haiku-4-5` for terminal chat, `claude-opus-5-5` for the weekly summary; **OpenRouter** (Gemini Flash) for reading tags; **Resend** for email
+- ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
 
 ## Project Structure
 
 ```
 personal-site/
-├── public/                    # Static assets
-│   ├── index.html            # HTML entry point
-│   ├── favicon.png           # Site favicon
-│   ├── manifest.json         # PWA manifest
-│   └── robots.txt            # SEO crawling rules
-│
+├── index.html                 # Vite entry (Google Analytics tag lives here)
+├── public/                    # favicon, manifest, robots.txt
 ├── src/
-│   ├── index.tsx             # React app entry point (React 19 API)
-│   ├── index.css             # Global styles and animations
-│   ├── App.tsx               # Main app component
-│   │
-│   ├── components/           # React components
-│   │   ├── TextScrambler.tsx    # Main scrambler component
-│   │   └── StreamingText.tsx    # LLM-style streaming text component
-│   │
-│   ├── hooks/                # Custom React hooks
-│   │   └── useScrambledText.ts  # Text scrambling logic
-│   │
-│   └── utils/                # Utility functions
-│       └── textScramble.ts      # Text scrambling algorithm
-│
-├── .nvmrc                    # Node version specification (22.21.0)
-├── CLAUDE.md                 # This file - project documentation
-├── package.json              # Dependencies & scripts (minimal deps)
-├── tsconfig.json             # TypeScript configuration
-└── yarn.lock                 # Dependency lock file
+│   ├── index.tsx              # createRoot + font imports
+│   ├── index.css              # All styles and animations
+│   ├── App.tsx                # Picks Landing vs TerminalMode from the URL
+│   ├── components/
+│   │   ├── TextScrambler.tsx  # Scramble animation, fires onComplete after holdMs
+│   │   ├── StreamingText.tsx  # Char-by-char reveal
+│   │   ├── Tagline.tsx        # "adventurer, cook, and founder of Junior" + link
+│   │   ├── TerminalMode.tsx   # Boot sequence (staged timeouts) then chat
+│   │   └── ChatInterface.tsx  # Terminal chat UI, POSTs to /api/chat
+│   ├── hooks/useScrambledText.ts
+│   └── utils/textScramble.ts  # Scramble algorithm
+├── api/
+│   ├── chat.ts                # Terminal assistant (system prompt lives here)
+│   ├── readwise-webhook.ts    # Tags new Readwise Reader docs
+│   ├── weekly-summary.ts      # Sunday 9am UTC cron (see vercel.json)
+│   ├── tsconfig.json          # Node/ESM config; Vercel also uses it to compile /api
+│   └── _lib/                  # Helpers; underscore keeps Vercel from deploying them as functions
+│       ├── auth.ts            # Constant-time secret comparison
+│       ├── email.ts           # Resend client
+│       ├── openrouter.ts      # OpenRouter client - article tagging
+│       ├── rate-limit.ts      # In-memory per-instance rate limiter for /api/chat
+│       ├── readwise.ts        # Readwise Reader v3 client
+│       └── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming)
+├── vite.config.ts
+├── eslint.config.js
+├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
+├── vercel.json                # framework: vite + crons
+└── .npmrc                     # min-release-age=7
 ```
 
-## Key Components & Files
+## Key Behavior
 
-### Active Components
+### Landing animation (`App.tsx`)
+1. `TextScrambler` scrambles in "nicholas moschopoulos" (new random chars every 50ms; each char locks in with probability rising per tick, so it solves left-to-right in ~4-5s)
+2. Solved text holds for 1s (`holdMs`), then "nimo" appears with the CSS glitch (`.nimo-glitch` + `::before`/`::after` keyframes)
+3. `StreamingText` streams the tagline at 40ms/char, then it's swapped for `Tagline` with the Junior link
+4. After 3s a "Press ~ for terminal mode" hint fades in
 
-#### `src/App.tsx`
-**Purpose**: Main application component
-**Current Implementation**: Ultra-minimal landing page
-- Shows full name scrambler first
-- Transitions to "nimo" with glitch effect
-- Subtitle streams in character by character
-- Final state: glitching "nimo" + hyperlinked subtitle
-- No routing, no navigation, no UI framework
+### Terminal mode
+- `TerminalMode` reveals the boot log in stages (`STAGE_DELAYS_MS`), then renders `ChatInterface`
+- `ChatInterface` refocuses the prompt on any keypress, draws a fake block cursor at `input.length` ch (monospace font), and keeps the conversation in React state: each request sends the last 20 messages, skipping error notices and the messages that got them. Reloading the page starts a new conversation
+- On touch devices the landing hint reads "Tap for terminal mode" (CSS `hover: none` media query); it's a link to `?mode=terminal` everywhere
 
-**Animation Flow**:
-1. "nicholas moschopoulos" scrambles in
-2. After completion, shows "nimo" with glitch effect
-3. Subtitle streams in like an LLM response
-4. Subtitle gets replaced with final version with Junior link
+### API functions
+- All use the Web standard `export default { fetch(request: Request) }` signature - no `@vercel/node`
+- `chat.ts`: takes `{ messages: [{ role, content }] }`, validates it (user turns <= 500 chars, last 20 kept, must end on a user turn), calls Claude Haiku 4.5, returns `{ response }`; errors return `{ error }` without internal details. Rate limited per instance: 10/min per IP, 200/hour overall (see DEPLOY.md for the free WAF rule and Anthropic spend cap)
+- `readwise-webhook.ts`: requires `READWISE_WEBHOOK_SECRET` (Readwise sends it as `secret` in the body); only handles `*document.created` events to avoid loops; merges generated tags with existing ones and won't overwrite a user's note
+- `weekly-summary.ts`: requires `Authorization: Bearer $CRON_SECRET` (Vercel cron sends this); `?days=` (1-31), `?email=false`, `?save=false` for manual runs. The summary is written by Claude Opus 5.5 at `medium` effort with server-side refusal fallbacks (`fallbacks: "default"`)
 
-#### `src/components/TextScrambler.tsx`
-**Purpose**: Text scrambling animation component
-**How it works**:
-1. Takes a `text` prop (e.g., "nicholas moschopoulos")
-2. Uses `useScrambledText` hook to animate scrambling effect
-3. After scramble completes, calls callback after 500ms
-4. Renders as plain `<h1>` with configurable className
+## Development
 
-**Key Props**:
-- `text: string` - The text to scramble
-- `callback: () => void` - Called when animation completes
-- `className?: string` - CSS class (defaults to 'scrambler')
-
-**Implementation Details**:
-- Pure function component with hooks
-- Uses useEffect to trigger callback when scrambling completes
-- No UI framework dependencies
-
-#### `src/components/StreamingText.tsx`
-**Purpose**: LLM-style streaming text component
-**How it works**:
-1. Receives full text to display
-2. Reveals one character at a time at configurable speed
-3. Calls onComplete callback when done
-4. Mimics ChatGPT/Claude streaming effect
-
-**Key Props**:
-- `text: string` - The full text to stream
-- `speed?: number` - Milliseconds per character (default: 30)
-- `className?: string` - CSS class
-- `onComplete?: () => void` - Called when streaming finishes
-
-**Implementation Details**:
-- Uses useState for displayedText and currentIndex
-- useEffect with setTimeout for character-by-character reveal
-- Returns undefined from useEffect to satisfy ESLint rules
-
-#### `src/hooks/useScrambledText.ts`
-**Purpose**: Hook that manages text scrambling state
-**Algorithm**:
-1. Starts with random characters via `getRandomString`
-2. Every 50ms, updates to new scrambled state via `getNewText`
-3. Gradually reveals correct characters based on iteration count
-4. Stops when scrambled text matches target text
-
-**Key Functions**:
-- `updateText()` - Recursively updates scrambled state with setTimeout
-- Uses refs (`scrambledTextRef`, `countRef`) to track current state without re-rendering
-- Cleans up timeout on unmount
-
-**Key State**:
-- `scrambledText` - Current displayed text (state)
-- `count` - Iteration count for probability calculation (state)
-- `scrambledTextRef` - Ref to current text for timeout callback
-- `countRef` - Ref to current count for timeout callback
-
-#### `src/utils/textScramble.ts`
-**Purpose**: Core scrambling algorithm
-**Key Constants**:
-- `SCRAMBLE_CHARS = '!<>-_\\/[]{}—=+*^?#'` - Characters used for scrambling
-- `INDEX_FOR_CORRECT_CHAR = 1000` - Probability modifier for revealing chars
-
-**Key Functions**:
-- `getRandomChar()` - Returns random scramble character
-- `getRandomString(textLength)` - Generates initial random string (5-textLength chars)
-- `getNewText(count, oldText, finalText)` - Generates next scrambled state
-  - Uses probability based on iteration count to reveal correct chars
-  - Uses position-based probability to determine when to change chars
-  - Maintains already-correct characters
-
-#### `src/index.css`
-**Purpose**: All styling and animations
-**Key Sections**:
-1. **Global Resets** - Zero margin/padding, border-box
-2. **Body Styles** - Black background, white text, Roboto font
-3. **Layout Classes** - `.app` (flex center), `.content` (vertical stack)
-4. **Text Styles** - `.scrambler` (Roboto Mono, 2rem)
-5. **Glitch Effect** - `.nimo-glitch` with pseudo-elements and animations
-6. **Subtitle Styles** - Gray text with link hover states
-
-**Glitch Animation**:
-- Three keyframe animations: `glitch`, `glitchTop`, `glitchBottom`
-- Main element skews and translates
-- `::before` pseudo-element: clips top 33%, animates independently
-- `::after` pseudo-element: clips bottom 33%, animates independently
-- Creates layered RGB-split glitch effect
-- Runs infinitely in a loop
-
-#### `src/index.tsx`
-**Purpose**: React app entry point
-**Key Changes**:
-- Uses React 19's `createRoot` API (not legacy `ReactDOM.render`)
-- Removed ChakraProvider and theme
-- Removed QueryClientProvider
-- Just wraps App in StrictMode
-
-## Animation Flow
-
-### Complete User Experience
-1. **Page Load**: Black screen, white text
-2. **Initial Scramble**: "nicholas moschopoulos" scrambles in character by character (~2-3 seconds)
-3. **Transition**: Brief pause (500ms)
-4. **Nimo Appears**: "nimo" appears with glitch effect (skewing, layered)
-5. **Subtitle Streams**: "adventurer, cook, and founder of Junior" types in character by character (~1.6 seconds at 40ms/char)
-6. **Final State**: Static "nimo" with glitch + clickable subtitle with "Junior" hyperlink
-
-### Scrambling Algorithm Details
-- Random characters cycle at 50ms intervals
-- Probability of revealing correct character increases with each iteration
-- Characters closer to the start reveal faster (position-based probability)
-- Already-correct characters are locked and don't change
-- Creates cascading "solving" effect from left to right
-
-### Glitch Animation Details
-- Main text element: skews and translates continuously
-- Before pseudo-element: clips top third (0-33%), moves with different timing
-- After pseudo-element: clips bottom third (67-100%), moves with different timing
-- Combined effect creates RGB-split layered glitch
-- Uses CSS keyframes, no JavaScript
-- Runs at different speeds: 0.5s (main & top), 1.5s (bottom)
-
-### Streaming Text Details
-- Reveals text at 40ms per character (configurable via props)
-- After streaming completes, replaces with final JSX including hyperlink
-- Mimics LLM response behavior
-- Uses setTimeout loop, not requestAnimationFrame
-
-## Development Patterns
-
-### TypeScript Patterns
-- Strict typing throughout
-- Props defined with explicit `type` declarations
-- Function components with typed props
-- No `any` types
-- Proper handling of optional props with default values and defaultProps
-
-### React Patterns
-- React 19 features (createRoot)
-- Functional components only (no class components)
-- Custom hooks for shared logic
-- useEffect for side effects and lifecycle
-- useState/useRef for state management
-- Callbacks passed as props for component communication
-- Proper cleanup of timeouts in useEffect
-
-### Styling Patterns
-- Vanilla CSS in single index.css file
-- CSS custom properties not used (keeping it simple)
-- Keyframe animations for glitch effect
-- No CSS-in-JS libraries
-- No styled-components or Emotion
-- Standard CSS classes
-- Responsive design not needed for single centered element
-
-### File Organization
-- Minimal structure: components/, hooks/, utils/
-- No theme directory (removed with Chakra UI)
-- No routes directory (removed)
-- No test files (removed)
-- Everything needed is in 5 files: App.tsx, TextScrambler.tsx, StreamingText.tsx, useScrambledText.ts, textScramble.ts
-
-## Build & Deployment
-
-### Available Scripts
-- `yarn start` - Start development server (port 3000)
-- `yarn build` - Create production build
-- `yarn eject` - Eject from CRA (not recommended)
-
-### Build Output
-- Production build goes to `build/` directory
-- **Main bundle: ~61 KB gzipped** (down from 135 KB with Chakra UI)
-- **CSS bundle: ~1.3 KB gzipped**
-- Optimized for hosting on static file servers
-- Massive bundle size improvement after removing Chakra UI
-
-### Environment
-- Node version enforced via `.nvmrc`: `22.21.0`
-- Package manager: Yarn 1.22.22
-- Build tool: Create React App 5.0.0
-- No custom webpack configuration (using CRA defaults)
-- No test framework configured
-
-## Design Decisions
-
-### Why Remove Chakra UI?
-User requested removal - it was overkill for a simple landing page. Replaced with 70 lines of vanilla CSS. Bundle size reduced by 52%.
-
-### Why Upgrade to React 19?
-Latest version with all new features. No reason to stay on old version for simple site.
-
-### Why Remove All Testing?
-No tests existed, testing libraries were dead weight. Simple site doesn't need test infrastructure.
-
-### Why Streaming Subtitle?
-User requested "stream in like an LLM value" - creates modern AI-app aesthetic that matches the glitch/technical vibe.
-
-### Why Keep Glitch Effect?
-User specifically liked it and requested it back. Adds personality and technical aesthetic. Pure CSS, no performance impact.
-
-### Why Black Background?
-User preference. Changed from blue to fully black minimal design.
-
-### Why Remove All Routes?
-User wanted to simplify and prevent random people from booking calls via Calendly. Now just a landing page.
-
-## Recent Major Changes
-
-### v3.0 - Complete Refactor (Latest)
-- **Removed**: Chakra UI, Emotion, framer-motion, all testing libraries
-- **Upgraded**: React 17 → 19, TypeScript 4.4 → 5.9.3
-- **Added**: Vanilla CSS, StreamingText component
-- **Changed**: index.tsx to use React 19's createRoot API
-- **Result**: Bundle size -52%, cleaner codebase, modern stack
-
-### v2.0 - Cleanup
-- Removed all unused routes, components, hooks, utils
-- Removed unused dependencies (kbar, wouter, react-calendly, etc.)
-- Deleted theme directory
-- Added CLAUDE.md documentation
-
-### v1.0 - Simplification
-- Removed full site navigation
-- Simplified to single landing page
-- Changed color scheme from blue to black
-- Added node version configuration
-
-## Dependencies
-
-### Production Dependencies (Minimal!)
-```json
-{
-  "@fontsource/roboto": "^4.5.3",
-  "@fontsource/roboto-mono": "^4.5.3",
-  "react": "^19.2.0",
-  "react-dom": "^19.2.0",
-  "react-scripts": "5.0.0",
-  "web-vitals": "^2.1.0"
-}
+```bash
+nvm use && npm install
+npm install -g vercel   # once; needed for npm start
+npm start               # vercel dev: site + API (needs .env, see .env.example)
+npm run start:web       # Vite only, no API
+npm run build           # tsc -b (src + api) then vite build -> dist/
+npm run lint
+npm run format
 ```
 
-### Dev Dependencies
-```json
-{
-  "@types/node": "^16.7.13",
-  "@types/react": "^19.2.2",
-  "@types/react-dom": "^19.2.2",
-  "@typescript-eslint/eslint-plugin": "^5.12.0",
-  "@typescript-eslint/parser": "^5.12.0",
-  "eslint": "^8.9.0",
-  "eslint-config-airbnb": "^19.0.4",
-  "eslint-config-prettier": "^8.4.0",
-  "eslint-import-resolver-typescript": "^2.5.0",
-  "eslint-plugin-import": "^2.25.4",
-  "eslint-plugin-prettier": "^4.0.0",
-  "eslint-plugin-react": "^7.28.0",
-  "prettier": "^2.5.1",
-  "typescript": "^5.9.3"
-}
-```
+### Verifying changes
+- `npm run build` must pass - it type-checks the frontend and the API, and Vercel runs it on deploy
+- `npm run lint` should be clean
+- No test suite
 
-## Notes for AI Assistants
+### Dependencies
+- `.npmrc` sets `min-release-age=7`: npm only installs versions published at least 7 days ago. Keep it.
+- `typescript` is pinned to `~6.0`: TypeScript 7 has no JS API yet, which breaks typescript-eslint and Vercel's function compiler.
+- The Vercel CLI is installed globally on purpose; as a devDependency it added ~270 packages (and every `npm audit` finding) to each deploy.
+- npm blocks dependency install scripts by default; `allowScripts` in `package.json` records decisions (fsevents ships a prebuilt binary, so its script is denied).
 
-### Current Active Code
-Only these files matter for functionality:
-- `src/App.tsx` - Main component with animation orchestration
-- `src/components/TextScrambler.tsx` - Scrambling animation
-- `src/components/StreamingText.tsx` - Streaming text effect
-- `src/hooks/useScrambledText.ts` - Scrambling logic
-- `src/utils/textScramble.ts` - Scrambling algorithm
-- `src/index.css` - All styles and animations
-- `src/index.tsx` - React 19 entry point
+## Design Decisions (user preferences)
+- Black, minimal design; no UI framework (Chakra UI was removed to cut bundle size)
+- Keep the glitch effect - the user specifically likes it
+- Streaming tagline should feel like an LLM response
+- No routes or booking links (removed so random people can't book calls via Calendly)
 
-### Making Changes
-- **Animations**: Modify timing in App.tsx or algorithms in textScramble.ts
-- **Styling**: Edit index.css (single file, ~120 lines)
-- **Text Content**: Change in App.tsx
-- **Glitch Effect**: Edit keyframes in index.css
-- **Streaming Speed**: Adjust `speed` prop in App.tsx (currently 40ms/char)
+## Common Tasks
+- **Scramble characters / speed**: `SCRAMBLE_CHARS` in `src/utils/textScramble.ts`, `TICK_MS` in `src/hooks/useScrambledText.ts`
+- **Streaming speed**: `speed` prop in `src/App.tsx` (40ms/char)
+- **Glitch**: `@keyframes glitch`, `glitchTop`, `glitchBottom` in `src/index.css`
+- **Colors**: `src/index.css` (background `#000`, text `#fff`, subtitle `#9ca3af`, terminal `#00ff00`)
+- **Terminal assistant persona**: `SYSTEM_PROMPT` in `api/chat.ts`
+- **Reading models**: `TAGGING_MODEL` in `api/_lib/openrouter.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts`
+- **Chat rate limits**: `perIpLimit` / `overallLimit` in `api/chat.ts`
 
-### Testing Changes
-- Always run `yarn build` to verify changes compile
-- Check for TypeScript errors
-- Check for ESLint errors (build will fail if errors exist)
-- No test suite to run
-
-### Commit Style
-- Descriptive commit messages
-- Explain "why" not just "what"
+## Commit Style
+- Descriptive commit messages that explain "why", not just "what"
 - Reference specific files changed
 - Note bundle size impacts
-
-### Common Tasks
-
-**Change scrambling characters**:
-Edit `SCRAMBLE_CHARS` in `src/utils/textScramble.ts`
-
-**Change scrambling speed**:
-Change timeout value in `src/hooks/useScrambledText.ts` (currently 50ms)
-
-**Change streaming speed**:
-Change `speed` prop in `src/App.tsx` StreamingText component (currently 40ms)
-
-**Change glitch animation**:
-Edit `@keyframes glitch`, `glitchTop`, `glitchBottom` in `src/index.css`
-
-**Change colors**:
-Edit color values in `src/index.css` (background: #000, text: #fff, subtitle: #9ca3af)
-
-**Change fonts**:
-Fonts are from @fontsource packages. To change, update imports in index.tsx and CSS
-
-**Add new animation**:
-Create new component like StreamingText.tsx, add keyframes to index.css if needed

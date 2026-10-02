@@ -4,6 +4,9 @@
  */
 
 const READWISE_API_BASE = 'https://readwise.io/api/v3';
+const MAX_RATE_LIMIT_RETRIES = 3;
+
+type Location = 'new' | 'later' | 'shortlist' | 'archive' | 'feed';
 
 export interface Article {
   id: string;
@@ -43,8 +46,17 @@ export interface SaveDocumentPayload {
   summary?: string;
   published_date?: string;
   image_url?: string;
-  location?: 'new' | 'later' | 'archive' | 'feed';
-  category?: 'article' | 'email' | 'rss' | 'highlight' | 'note' | 'pdf' | 'epub' | 'tweet' | 'video';
+  location?: Location;
+  category?:
+    | 'article'
+    | 'email'
+    | 'rss'
+    | 'highlight'
+    | 'note'
+    | 'pdf'
+    | 'epub'
+    | 'tweet'
+    | 'video';
   saved_using?: string;
   tags?: string[];
   notes?: string;
@@ -53,7 +65,7 @@ export interface SaveDocumentPayload {
 export interface UpdateDocumentPayload {
   tags?: string[];
   notes?: string;
-  location?: 'new' | 'later' | 'archive' | 'feed';
+  location?: Location;
   reading_progress?: number;
 }
 
@@ -67,18 +79,28 @@ function getApiKey(): string {
 
 async function makeRequest<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  attempt = 0,
 ): Promise<T> {
   const apiKey = getApiKey();
 
   const response = await fetch(`${READWISE_API_BASE}${endpoint}`, {
     ...options,
     headers: {
-      'Authorization': `Token ${apiKey}`,
+      Authorization: `Token ${apiKey}`,
       'Content-Type': 'application/json',
       ...options.headers,
     },
   });
+
+  // Readwise rate limits per token (e.g. 20/min on /list/) and says when to retry
+  if (response.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+    const retryAfterSeconds = Number(response.headers.get('Retry-After')) || 60;
+    await new Promise((resolve) =>
+      setTimeout(resolve, retryAfterSeconds * 1000),
+    );
+    return makeRequest<T>(endpoint, options, attempt + 1);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -90,7 +112,7 @@ async function makeRequest<T>(
     return {} as T;
   }
 
-  return response.json();
+  return (await response.json()) as T;
 }
 
 /**
@@ -100,7 +122,7 @@ async function makeRequest<T>(
  */
 export async function fetchArticles(
   updatedAfter?: Date,
-  location?: string
+  location?: Location,
 ): Promise<Article[]> {
   const articles: Article[] = [];
   let nextPageCursor: string | null = null;
@@ -129,10 +151,12 @@ export async function fetchArticles(
 }
 
 /**
- * Fetch a single article by ID
+ * Fetch a single article by ID (the list endpoint is the only way to read one)
  */
-export async function fetchArticle(id: string): Promise<Article> {
-  return makeRequest<Article>(`/get/${id}/`);
+export async function fetchArticle(id: string): Promise<Article | undefined> {
+  const params = new URLSearchParams({ id });
+  const response = await makeRequest<ArticleListResponse>(`/list/?${params}`);
+  return response.results[0];
 }
 
 /**
@@ -140,7 +164,7 @@ export async function fetchArticle(id: string): Promise<Article> {
  */
 export async function updateDocument(
   id: string,
-  payload: UpdateDocumentPayload
+  payload: UpdateDocumentPayload,
 ): Promise<void> {
   await makeRequest(`/update/${id}/`, {
     method: 'PATCH',
@@ -151,7 +175,9 @@ export async function updateDocument(
 /**
  * Save a new document to Readwise Reader
  */
-export async function saveDocument(payload: SaveDocumentPayload): Promise<{ id: string; url: string }> {
+export async function saveDocument(
+  payload: SaveDocumentPayload,
+): Promise<{ id: string; url: string }> {
   return makeRequest('/save/', {
     method: 'POST',
     body: JSON.stringify(payload),

@@ -7,69 +7,74 @@ My personal site (live on [https://nimo.fyi](https://nimo.fyi)) - a minimal land
 ### Main Site
 - Text scrambler animation with glitch effects
 - Minimal design with vanilla CSS
-- Ultra-small bundle size (~62 KB gzipped)
 
 ### Terminal Mode (Secret Feature!)
-Visit `?mode=terminal` to unlock:
+Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - Retro terminal boot sequence
-- AI chat interface powered by Claude Haiku
+- AI chat interface powered by Claude Haiku 4.5 (remembers the conversation)
 - Neon green terminal aesthetics
 - Answer questions about me in terminal-style
 
+### Reading Workflows
+- `/api/readwise-webhook` - auto-tags new Readwise Reader documents
+- `/api/weekly-summary` - weekly cron that emails a Claude Opus 5.5 summary of my reading
+
 ## Tech Stack
 
-- **React 19** - Latest React with modern APIs
-- **TypeScript 5.9** - Strict type safety
+- **React 19** - UI
+- **TypeScript 6** - Strict type safety
+- **Vite 8** - Dev server and build
 - **Vanilla CSS** - No framework bloat
-- **Create React App** - Build tooling
-- **Vercel Serverless Functions** - Backend API for chat
-- **Anthropic Claude Haiku** - Fast, cost-effective AI
+- **Vercel Functions** - Backend API (`/api`)
+- **Anthropic Claude** - Haiku 4.5 for terminal chat, Opus 5.5 for reading summaries
+- **OpenRouter (Gemini Flash)** - Reading tags
 - **Share Tech Mono** - Cool terminal font
 
 ## Quick Start
 
 ```bash
+# Use the pinned Node version
+nvm use
+
 # Install dependencies
-yarn install
+npm install
 
-# Create .env file with your Anthropic API key
-echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
+# Install the Vercel CLI once (used to run the API functions locally)
+npm install -g vercel
 
-# Run development server (includes serverless functions)
-yarn start
+# Create .env with the keys you need (see .env.example)
+cp .env.example .env
 
-# Visit the main site
-open http://localhost:3000
+# Run the site and API functions together
+npm start
 
-# Visit the terminal mode
-open http://localhost:3000?mode=terminal
+# Or just the frontend (no API)
+npm run start:web
 ```
 
-**Note**: `yarn start` now runs `vercel dev` which includes both the React app and the API functions. If you just want the React dev server without the API, use `yarn start:react`.
+## Scripts
+
+| Script              | What it does                                |
+| ------------------- | ------------------------------------------- |
+| `npm start`         | `vercel dev` - site + API functions          |
+| `npm run start:web` | Vite dev server only                        |
+| `npm run build`     | Type-check everything, then build to `dist` |
+| `npm run lint`      | ESLint                                      |
+| `npm run format`    | Prettier                                    |
+
+## Dependency Policy
+
+`.npmrc` sets `min-release-age=7`, so npm only installs package versions that have been published for at least a week. That gives the registry time to catch and pull compromised releases before they reach this project.
 
 ## Deployment
 
 See [DEPLOY.md](./DEPLOY.md) for full deployment instructions to Vercel.
 
-**TL;DR**:
-1. Push to GitHub
-2. Import to Vercel
-3. Set `ANTHROPIC_API_KEY` environment variable
-4. Deploy!
-
 ## Project Structure
 
 - `/src` - React frontend code
-- `/api` - Vercel serverless functions (TypeScript)
+- `/api` - Vercel Functions (TypeScript); shared helpers live in `/api/_lib`
 - `CLAUDE.md` - Detailed project documentation
 - `DEPLOY.md` - Deployment guide
-
-## Development Tools
-
-- [Vercel](https://vercel.com/) for deployment
-- [Google Domains](https://domains.google) for domain management
-- [Create React App](https://create-react-app.dev) for build tooling
-- [eslint](https://eslint.org) & [prettier](https://prettier.io) for code formatting
-- [Anthropic Claude](https://anthropic.com) for AI chat
 
 Enjoy, and please shoot me any feedback you have!

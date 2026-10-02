@@ -1,142 +1,131 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { fetchArticle, updateDocument } from './lib/readwise.js';
-import { generateTags } from './lib/openrouter.js';
+import { secretsMatch } from './_lib/auth.js';
+import { generateTags } from './_lib/openrouter.js';
+import { fetchArticle, updateDocument } from './_lib/readwise.js';
 
 /**
  * Readwise Reader Webhook Handler
  *
- * This endpoint receives webhooks from Readwise Reader when new articles are saved.
- * It generates AI-powered tags and updates the article in Readwise.
+ * Receives Readwise Reader webhooks when new documents are saved, generates
+ * AI-powered tags, and writes them back to the document.
  *
- * Webhook payload from Readwise:
- * - id: Document ID
- * - url: Article URL
- * - title: Article title
- * - author: Article author
- * - summary: Article summary
+ * Subscribe it to `reader.any_document.created` (or the feed / non-feed
+ * variants). Readwise sends the document fields at the top level of the JSON
+ * body, along with `event_type` and the webhook `secret`.
+ * Docs: https://docs.readwise.io/readwise/docs/webhooks
  */
 
 interface WebhookPayload {
-  id: string;
-  url: string;
-  title: string;
-  author?: string;
-  summary?: string;
+  event_type?: string;
+  secret?: string;
+  id?: string;
+  url?: string;
+  title?: string;
+  author?: string | null;
+  summary?: string | null;
+  notes?: string | null;
+  tags?: Record<string, unknown> | null;
 }
 
-interface SuccessResponse {
-  success: true;
-  documentId: string;
-  tags: string[];
-  primaryTag: string;
-}
+const errorResponse = (error: string, status: number, details?: string) =>
+  Response.json({ error, details }, { status });
 
-interface ErrorResponse {
-  error: string;
-  details?: string;
-}
+export default {
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== 'POST') {
+      return errorResponse('Method not allowed', 405);
+    }
 
-function validateWebhookSecret(req: VercelRequest): boolean {
-  const secret = process.env.READWISE_WEBHOOK_SECRET;
-  if (!secret) {
-    console.warn('READWISE_WEBHOOK_SECRET not configured - skipping validation');
-    return true;
-  }
+    const expectedSecret = process.env.READWISE_WEBHOOK_SECRET;
+    if (!expectedSecret) {
+      console.error('READWISE_WEBHOOK_SECRET is not set - rejecting webhook');
+      return errorResponse('Webhook not configured', 500);
+    }
 
-  // Check for secret in various locations
-  const providedSecret =
-    req.headers['x-webhook-secret'] ||
-    req.headers['authorization']?.replace('Bearer ', '') ||
-    (req.body as { secret?: string })?.secret;
+    const payload = (await request
+      .json()
+      .catch(() => null)) as WebhookPayload | null;
+    if (!payload) {
+      return errorResponse('Invalid JSON body', 400);
+    }
 
-  return providedSecret === secret;
-}
+    // Readwise puts the secret in the body; the headers support manual testing
+    const providedSecret =
+      payload.secret ??
+      request.headers.get('x-webhook-secret') ??
+      request.headers.get('authorization')?.replace(/^Bearer /, '');
+    if (!secretsMatch(providedSecret, expectedSecret)) {
+      return errorResponse('Unauthorized - invalid webhook secret', 401);
+    }
 
-export default async function handler(
-  req: VercelRequest,
-  res: VercelResponse<SuccessResponse | ErrorResponse>
-) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-Webhook-Secret, Content-Type, Authorization'
-  );
+    // Only tag new documents. Writing tags triggers `tags_updated`, so
+    // reacting to other events could loop forever.
+    if (
+      payload.event_type &&
+      !payload.event_type.endsWith('document.created')
+    ) {
+      return Response.json({ skipped: true, eventType: payload.event_type });
+    }
 
-  // Handle OPTIONS request for CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
-  // Only allow POST requests
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  // Validate webhook secret
-  if (!validateWebhookSecret(req)) {
-    return res.status(401).json({ error: 'Unauthorized - invalid webhook secret' });
-  }
-
-  try {
-    const payload = req.body as WebhookPayload;
-
-    // Validate required fields
     if (!payload.id || !payload.url || !payload.title) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        details: 'Payload must include id, url, and title',
-      });
+      return errorResponse(
+        'Missing required fields',
+        400,
+        'Payload must include id, url, and title',
+      );
     }
 
-    console.log(`Processing article: ${payload.title} (${payload.id})`);
-
-    // Fetch full article content from Readwise for better context
-    let articleSummary = payload.summary;
     try {
-      const fullArticle = await fetchArticle(payload.id);
-      if (fullArticle.summary) {
-        articleSummary = fullArticle.summary;
+      console.log(`Processing article: ${payload.title} (${payload.id})`);
+
+      // Readwise may have a better summary than the webhook payload
+      let articleSummary = payload.summary;
+      try {
+        const fullArticle = await fetchArticle(payload.id);
+        if (fullArticle?.summary) {
+          articleSummary = fullArticle.summary;
+        }
+      } catch (fetchError) {
+        console.warn(
+          'Could not fetch full article, using webhook payload:',
+          fetchError,
+        );
       }
-    } catch (fetchError) {
-      console.warn('Could not fetch full article, using webhook payload:', fetchError);
+
+      const tagResult = await generateTags({
+        title: payload.title,
+        author: payload.author ?? null,
+        summary: articleSummary ?? null,
+        url: payload.url,
+      });
+
+      console.log(`Generated tags for ${payload.id}:`, tagResult.tags);
+
+      // Readwise replaces the tag list on update, so keep any existing tags.
+      // Generated tags come back as #kebab-case; Readwise wants them bare.
+      const newTags = tagResult.tags.map((tag) => tag.replace(/^#/, ''));
+      const existingTags = Object.keys(payload.tags ?? {});
+
+      await updateDocument(payload.id, {
+        tags: [...new Set([...existingTags, ...newTags])],
+        // Don't overwrite a note the user wrote when saving
+        ...(payload.notes ? {} : { notes: tagResult.notes }),
+      });
+
+      console.log(`Updated article ${payload.id} with tags`);
+
+      return Response.json({
+        success: true,
+        documentId: payload.id,
+        tags: newTags,
+        primaryTag: tagResult.primary_tag,
+      });
+    } catch (error) {
+      console.error('Error processing webhook:', error);
+      return errorResponse(
+        'Failed to process webhook',
+        500,
+        error instanceof Error ? error.message : 'Unknown error',
+      );
     }
-
-    // Generate tags using LLM
-    const tagResult = await generateTags({
-      title: payload.title,
-      author: payload.author ?? null,
-      summary: articleSummary ?? null,
-      url: payload.url,
-    });
-
-    console.log(`Generated tags for ${payload.id}:`, tagResult.tags);
-
-    // Update the article in Readwise with generated tags
-    // Remove # prefix from tags for Readwise API
-    const cleanTags = tagResult.tags.map((tag) => tag.replace(/^#/, ''));
-
-    await updateDocument(payload.id, {
-      tags: cleanTags,
-      notes: tagResult.notes,
-    });
-
-    console.log(`Updated article ${payload.id} with tags`);
-
-    return res.status(200).json({
-      success: true,
-      documentId: payload.id,
-      tags: tagResult.tags,
-      primaryTag: tagResult.primary_tag,
-    });
-  } catch (error) {
-    console.error('Error processing webhook:', error);
-    return res.status(500).json({
-      error: 'Failed to process webhook',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-}
+  },
+};

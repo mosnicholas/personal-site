@@ -1,99 +1,75 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import StreamingText from './components/StreamingText';
+import Tagline, { TAGLINE } from './components/Tagline';
 import TerminalMode from './components/TerminalMode';
 import TextScrambler from './components/TextScrambler';
 
-const App = () => {
+const isTerminalUrl = () =>
+  new URLSearchParams(window.location.search).get('mode') === 'terminal';
+
+const Landing = () => {
   const [showNimo, setShowNimo] = useState(false);
   const [streamingComplete, setStreamingComplete] = useState(false);
-  const [isTerminalMode, setIsTerminalMode] = useState(false);
   const [showHint, setShowHint] = useState(false);
 
   useEffect(() => {
-    // Check for mode=terminal query parameter
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'terminal') {
-      setIsTerminalMode(true);
-    }
+    const timeout = setTimeout(() => setShowHint(true), 3000);
+    return () => clearTimeout(timeout);
   }, []);
 
   useEffect(() => {
-    // Show hint after 3 seconds
-    const hintTimer = setTimeout(() => {
-      setShowHint(true);
-    }, 3000);
-
-    return () => clearTimeout(hintTimer);
-  }, []);
-
-  useEffect(() => {
-    // Listen for ~ or t key to activate terminal mode
-    const handleKeyPress = (e: KeyboardEvent) => {
+    // ~ or t opens terminal mode (ignore browser shortcuts like Cmd+T)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === '~' || e.key === 't') {
         window.location.href = '?mode=terminal';
       }
     };
 
-    // Only add listener if not in terminal mode
-    if (!isTerminalMode) {
-      document.addEventListener('keydown', handleKeyPress);
-      return () => {
-        document.removeEventListener('keydown', handleKeyPress);
-      };
-    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
-    return undefined;
-  }, [isTerminalMode]);
-
-  // Render terminal mode if query parameter is present
-  if (isTerminalMode) {
-    return <TerminalMode />;
-  }
-
-  // Original site rendering
   return (
     <div className="app">
       <div className="content">
-        {!showNimo ? (
-          <TextScrambler
-            text="nicholas moschopoulos"
-            callback={() => {
-              setTimeout(() => setShowNimo(true), 500);
-            }}
-          />
-        ) : (
+        {showNimo ? (
           <>
             <h1 className="nimo-glitch">nimo</h1>
-            {!streamingComplete ? (
+            {streamingComplete ? (
+              <Tagline className="subtitle" />
+            ) : (
               <StreamingText
-                text="adventurer, cook, and founder of Junior"
+                text={TAGLINE}
                 speed={40}
                 className="subtitle"
                 onComplete={() => setStreamingComplete(true)}
               />
-            ) : (
-              <div className="subtitle">
-                adventurer, cook, and founder of{' '}
-                <a
-                  href="https://myjunior.ai"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Junior
-                </a>
-              </div>
             )}
           </>
+        ) : (
+          <TextScrambler
+            text="nicholas moschopoulos"
+            holdMs={1000}
+            onComplete={() => setShowNimo(true)}
+          />
         )}
       </div>
       {showHint && (
-        <div className="terminal-hint">
-          Press <span className="key-hint">~</span> for terminal mode
-        </div>
+        <a className="terminal-hint" href="?mode=terminal">
+          <span className="hint-keyboard">
+            Press <span className="key-hint">~</span> for terminal mode
+          </span>
+          <span className="hint-touch">
+            Tap for <span className="key-hint">terminal mode</span>
+          </span>
+        </a>
       )}
     </div>
   );
 };
+
+const App = () => (isTerminalUrl() ? <TerminalMode /> : <Landing />);
 
 export default App;

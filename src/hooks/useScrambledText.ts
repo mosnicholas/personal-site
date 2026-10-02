@@ -1,41 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { getNewText, getRandomString } from 'utils/textScramble';
+import { getNewText, getRandomString } from '../utils/textScramble';
+
+const TICK_MS = 50;
 
 const useScrambledText = (text: string) => {
-  const [scrambledText, setScrambledText] = useState('');
-  const [count, setCount] = useState(0);
-  const scrambledTextRef = useRef('');
-  const countRef = useRef(0);
-  let timeout: ReturnType<typeof setTimeout>;
-
-  const updateText = () => {
-    clearTimeout(timeout);
-
-    const newText = getNewText(
-      countRef.current,
-      scrambledTextRef.current,
-      text,
-    );
-    setScrambledText(newText);
-
-    if (newText !== text) {
-      setCount((c) => c + 1);
-      timeout = setTimeout(updateText, 50);
-    }
-  };
+  const [scrambledText, setScrambledText] = useState(() =>
+    getRandomString(text.length),
+  );
 
   useEffect(() => {
-    scrambledTextRef.current = scrambledText;
-  }, [scrambledText]);
+    let current = '';
+    let count = 0;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
 
-  useEffect(() => {
-    countRef.current = count;
-  }, [count]);
+    const tick = () => {
+      current = getNewText(count, current, text);
+      count += 1;
+      setScrambledText(current);
 
-  useEffect(() => {
-    setScrambledText(() => getRandomString(text.length));
-    updateText();
+      if (current !== text) {
+        timeout = setTimeout(tick, TICK_MS);
+      }
+    };
+
+    timeout = setTimeout(tick, TICK_MS);
     return () => clearTimeout(timeout);
   }, [text]);
 

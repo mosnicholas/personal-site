@@ -38,7 +38,7 @@ function getRecipientEmail(): string {
  */
 export async function sendWeeklySummary(
   html: string,
-  subject: string
+  subject: string,
 ): Promise<{ id: string }> {
   const apiKey = getApiKey();
   const recipientEmail = getRecipientEmail();
@@ -53,7 +53,7 @@ export async function sendWeeklySummary(
   const response = await fetch(`${RESEND_API_BASE}/emails`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
