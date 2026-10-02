@@ -4,6 +4,8 @@
  * the first backfill can take several runs.
  */
 
+import Anthropic from '@anthropic-ai/sdk';
+
 import {
   countDocumentsNeedingSummary,
   documentsNeedingSummary,
@@ -27,8 +29,8 @@ const SYNC_STATE = 'documents';
 // Re-list a little before the last sync started, in case of clock skew
 const OVERLAP_MS = 10 * 60_000;
 // Readwise allows 20 list requests a minute, and a document whose text we
-// don't have yet needs one
-const SUMMARY_CONCURRENCY = 5;
+// don't have yet needs one; Sonnet takes ~30s per document
+const SUMMARY_CONCURRENCY = 6;
 
 interface SyncState {
   /** When the last complete listing started; the next one lists from here */
@@ -100,9 +102,10 @@ export async function summarizeMissing(deadline: number): Promise<{
 }> {
   let summarized = 0;
   let failed = 0;
+  let throttled = false;
   const tried = new Set<string>();
 
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && !throttled) {
     const batch = (
       await documentsNeedingSummary(
         SUMMARY_VERSION,
@@ -130,6 +133,16 @@ export async function summarizeMissing(deadline: number): Promise<{
           await saveDocumentSummary(id, summary, SUMMARY_VERSION);
           summarized += 1;
         } catch (error) {
+          // Rate limits and overload aren't the document's fault: stop this
+          // run without using up its attempts, and let the next run retry
+          if (
+            error instanceof Anthropic.APIError &&
+            (error.status === 429 || error.status === 529)
+          ) {
+            console.warn(`Anthropic is throttling (${error.status}), stopping`);
+            throttled = true;
+            return;
+          }
           console.warn(`Could not summarize ${id}:`, error);
           await recordSummaryFailure(id);
           failed += 1;
