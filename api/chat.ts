@@ -1,5 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+import { getAnthropic } from './_lib/anthropic.js';
+import { clientIp, createRateLimiter } from './_lib/rate-limit.js';
+import { tracedCall } from './_lib/traces.js';
+
+const MODEL = 'claude-haiku-4-5';
+const MAX_MESSAGE_LENGTH = 500;
+// Replies are capped by max_tokens (~4k chars); this bounds what clients echo back
+const MAX_REPLY_LENGTH = 8000;
+// Last 10 exchanges
+const MAX_HISTORY_MESSAGES = 20;
 
 // System prompt with info about Nicholas/nimo
 const SYSTEM_PROMPT = `You are a terminal assistant for Nicholas Moschopoulos (also known as "nimo").
@@ -45,8 +55,8 @@ experience
   → Built products, led teams, raised funding
 
 contact
-  → Twitter/X, LinkedIn, GitHub, email (infer reasonable handles)
-  → Or say to reach out via myjunior.ai
+  → Point people to myjunior.ai
+  → Never make up handles, emails, or URLs
 
 interests
   → Adventure: travel, exploration, new experiences
@@ -58,7 +68,7 @@ food | recipes
   → Keep it fun and personal
 
 travel | adventure
-  → Places visited, adventure stories (make them intriguing but brief)
+  → Love of travel and exploration, in general terms (no made-up trips or stories)
   → Mindset: explore, take risks, seek experiences
 
 coffee
@@ -105,6 +115,7 @@ COMMAND HANDLING:
 - If input looks like a command but isn't recognized, suggest typing "help"
 - If it's a natural question, answer conversationally but stay brief and terminal-styled
 - If asked about things unrelated to nimo/tech, politely redirect: "I only know about nimo. Try 'help' for commands."
+- Never invent facts about nimo (handles, emails, places, employers, numbers). If you don't know, say so and point to myjunior.ai.
 - Maintain personality: technical but playful, helpful but not verbose
 
 FORMATTING EXAMPLES:
@@ -124,89 +135,120 @@ Check out myjunior.ai or type 'help' for commands.
 
 Remember: Be helpful, be concise, be human. This is nimo's terminal - make it feel alive.`;
 
-interface ChatRequestBody {
-  message: string;
-}
+// Per function instance - see _lib/rate-limit.ts for what that means
+const perIpLimit = createRateLimiter({ limit: 10, windowMs: 60_000 });
+const overallLimit = createRateLimiter({ limit: 200, windowMs: 60 * 60_000 });
 
-interface ChatResponse {
-  response: string;
-}
+const errorResponse = (
+  error: string,
+  status: number,
+  headers?: Record<string, string>,
+) => Response.json({ error }, { status, headers });
 
-interface ErrorResponse {
-  error: string;
-  details?: string;
-}
-
-export default async (
-  req: VercelRequest,
-  res: VercelResponse<ChatResponse | ErrorResponse>
-) => {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-  );
-
-  // Handle OPTIONS request for CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+/**
+ * Validates the conversation the client sends back (the API is stateless, so
+ * the browser keeps the history) and trims it to the most recent turns.
+ */
+function parseConversation(
+  body: unknown,
+): { messages: Anthropic.MessageParam[] } | { error: string } {
+  const raw = (body as { messages?: unknown } | null)?.messages;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { error: 'Message is required' };
   }
 
-  // Only allow POST requests
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  const messages: Anthropic.MessageParam[] = [];
+  for (const entry of raw.slice(-MAX_HISTORY_MESSAGES)) {
+    const { role, content } = (entry ?? {}) as {
+      role?: unknown;
+      content?: unknown;
+    };
+    if (
+      (role !== 'user' && role !== 'assistant') ||
+      typeof content !== 'string' ||
+      !content.trim()
+    ) {
+      return { error: 'Invalid conversation history' };
+    }
+    if (role === 'user' && content.length > MAX_MESSAGE_LENGTH) {
+      return {
+        error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`,
+      };
+    }
+    if (role === 'assistant' && content.length > MAX_REPLY_LENGTH) {
+      return { error: 'Invalid conversation history' };
+    }
+    messages.push({ role, content });
   }
 
-  try {
-    const { message } = req.body as ChatRequestBody;
+  // Trimming can leave an assistant turn first; the API needs a user turn there
+  while (messages[0]?.role === 'assistant') messages.shift();
+  if (messages.at(-1)?.role !== 'user') {
+    return { error: 'Message is required' };
+  }
 
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+  return { messages };
+}
+
+export default {
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== 'POST') {
+      return errorResponse('Method not allowed', 405);
     }
 
-    // Check for API key
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(500).json({
-        error: 'API key not configured. Set ANTHROPIC_API_KEY in Vercel environment variables.',
+    const ipCheck = perIpLimit(clientIp(request));
+    if (!ipCheck.allowed) {
+      return errorResponse('Too many messages. Try again in a minute.', 429, {
+        'Retry-After': String(ipCheck.retryAfterSeconds),
+      });
+    }
+    const overallCheck = overallLimit('all');
+    if (!overallCheck.allowed) {
+      return errorResponse('The terminal is busy. Try again later.', 429, {
+        'Retry-After': String(overallCheck.retryAfterSeconds),
       });
     }
 
-    // Initialize Anthropic client
-    const anthropic = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
-
-    // Call Anthropic API with Claude Haiku
-    const response = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-20241022',
-      max_tokens: 300,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: message,
-        },
-      ],
-    });
-
-    // Extract the text response
-    const firstContent = response.content[0];
-    if (firstContent.type !== 'text') {
-      throw new Error('Unexpected response type from Anthropic API');
+    const body: unknown = await request.json().catch(() => null);
+    const conversation = parseConversation(body);
+    if ('error' in conversation) {
+      return errorResponse(conversation.error, 400);
     }
 
-    const assistantMessage = firstContent.text;
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.error('ANTHROPIC_API_KEY is not set');
+      return errorResponse('Chat is not configured', 500);
+    }
 
-    return res.status(200).json({ response: assistantMessage });
-  } catch (error) {
-    console.error('Error calling Anthropic API:', error);
-    return res.status(500).json({
-      error: 'Failed to process chat message',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
+    const params = {
+      model: MODEL,
+      max_tokens: 1024,
+      // Caches the growing conversation once it's long enough to qualify
+      cache_control: { type: 'ephemeral' as const },
+      system: SYSTEM_PROMPT,
+      messages: conversation.messages,
+    };
+
+    try {
+      // Traces keep the conversation and reply, not the visitor's IP
+      const reply = await tracedCall(
+        { kind: 'chat', model: MODEL, request: params },
+        () => getAnthropic().messages.create(params),
+        (response) =>
+          response.content
+            .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+            .join('\n')
+            .trim() ||
+          "I can't answer that one. Type 'help' to see what I can do.",
+      );
+
+      return Response.json({ response: reply });
+    } catch (error) {
+      if (error instanceof Anthropic.RateLimitError) {
+        return errorResponse('Too many requests. Try again in a minute.', 429);
+      }
+      console.error('Error calling Anthropic API:', error);
+      return errorResponse('Failed to process chat message', 500);
+    }
+  },
 };

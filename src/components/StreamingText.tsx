@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 
 type StreamingTextProps = {
   text: string;
+  /** Milliseconds per character. */
   speed?: number;
   className?: string;
   onComplete?: () => void;
@@ -10,36 +11,23 @@ type StreamingTextProps = {
 const StreamingText = ({
   text,
   speed = 30,
-  className = '',
+  className,
   onComplete,
 }: StreamingTextProps) => {
-  const [displayedText, setDisplayedText] = useState('');
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [visibleChars, setVisibleChars] = useState(0);
+  const handleComplete = useEffectEvent(() => onComplete?.());
 
   useEffect(() => {
-    if (currentIndex < text.length) {
-      const timeout = setTimeout(() => {
-        setDisplayedText((prev) => prev + text[currentIndex]);
-        setCurrentIndex((prev) => prev + 1);
-      }, speed);
-
-      return () => clearTimeout(timeout);
+    if (visibleChars >= text.length) {
+      handleComplete();
+      return undefined;
     }
 
-    if (currentIndex === text.length && onComplete) {
-      onComplete();
-    }
+    const timeout = setTimeout(() => setVisibleChars((n) => n + 1), speed);
+    return () => clearTimeout(timeout);
+  }, [visibleChars, text.length, speed]);
 
-    return undefined;
-  }, [currentIndex, text, speed, onComplete]);
-
-  return <div className={className}>{displayedText}</div>;
-};
-
-StreamingText.defaultProps = {
-  speed: 30,
-  className: '',
-  onComplete: undefined,
+  return <div className={className}>{text.slice(0, visibleChars)}</div>;
 };
 
 export default StreamingText;

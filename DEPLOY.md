@@ -1,133 +1,154 @@
 # Deployment Guide
 
-This site can be deployed to Vercel with the terminal chat feature fully working via serverless functions.
+The site deploys to Vercel: the Vite build is served as static files and everything in `/api` runs as Vercel Functions.
 
 ## Deploying to Vercel
 
-### 1. Push to GitHub
-```bash
-git push origin main
-```
+### 1. Import the repo
+1. Go to [vercel.com](https://vercel.com) and click "Add New Project"
+2. Import the `personal-site` repository
+3. `vercel.json` sets the framework to Vite; build output goes to `dist`
 
-### 2. Import to Vercel
-1. Go to [vercel.com](https://vercel.com)
-2. Click "Add New Project"
-3. Import your `personal-site` repository
-4. Vercel will auto-detect it's a Create React App
+### 2. Set Environment Variables
+In Vercel project settings, add these for Production (and Preview if you want the features there):
 
-### 3. Set Environment Variables
-In Vercel project settings, add:
-- **Key**: `ANTHROPIC_API_KEY`
-- **Value**: Your Anthropic API key from https://console.anthropic.com/
+| Variable                  | Used by                       | Where to get it                                       |
+| ------------------------- | ----------------------------- | ----------------------------------------------------- |
+| `ANTHROPIC_API_KEY`       | chat, tagging, rebalance, summary | https://console.anthropic.com/                    |
+| `DATABASE_URL`            | LLM trace log                 | Set automatically by the Neon integration (below)     |
+| `READWISE_API_KEY`        | webhook + weekly summary      | https://readwise.io/access_token                       |
+| `READWISE_WEBHOOK_SECRET` | `/api/readwise-webhook`       | Readwise generates it (step 5)                        |
+| `RESEND_API_KEY`          | weekly summary email          | Resend → API Keys (see "Email setup" below)           |
+| `WEEKLY_SUMMARY_RECIPIENT_EMAIL` | weekly summary email   | Your inbox (mail comes from `reader@nimo.fyi`)        |
+| `CRON_SECRET`             | both cron jobs                | Make one up: `openssl rand -hex 32 \| pbcopy`          |
 
-Set this for all environments (Production, Preview, Development).
+The webhook and cron endpoints refuse requests when their secret isn't set. Env var changes only apply to new deployments, so redeploy after adding one.
 
-### 4. Deploy
-Click "Deploy" - Vercel will:
-- Build the React app
-- Deploy the serverless function at `/api/chat`
-- Configure everything automatically
+### 3. Deploy
+Push to `main` (or click "Deploy"). Vercel will:
+- Run `npm install` from `package-lock.json`
+- Run `npm run build` (type-checks the frontend **and** the API, then builds)
+- Deploy each file in `/api` as a function and register the two weekly crons
 
-### 5. Test Terminal Mode
-Visit: `https://your-site.vercel.app?mode=terminal`
+### 4. Protect the chat endpoint (free)
+`/api/chat` is public and spends your Anthropic credits, so it has three layers:
 
-The chat should work immediately!
+1. **Built in:** each function instance allows 10 messages per minute per IP and 200 per hour overall. These counts live in memory, so they're approximate (Vercel can run several instances), but they need no setup.
+2. **Exact limit - Vercel WAF rule (free on Hobby, which includes 1 rate-limit rule and 1M requests):** Project → Firewall → Configure → New Rule. If *Request Path* *equals* `/api/chat`, then *Rate Limit*: fixed window, 60s, 10 requests, key *IP*, action *Default (429)*. Save, then Review Changes → Publish.
+3. **Hard spend cap:** in the Anthropic Console, put the key in its own workspace and set a monthly spend limit (e.g. $10). Nothing can spend past it.
 
-## How It Works
+### 5. Configure the Readwise webhook
+The endpoint has to be live in production first (step 3).
 
-- **Frontend**: React app served as static files
-- **Backend**: `/api/chat.ts` runs as a Vercel Serverless Function
-- **API Key**: Stored securely in Vercel environment variables
-- **Requests**: Frontend calls `/api/chat` → Vercel routes to serverless function
+1. Go to https://readwise.io/webhook and add a webhook
+2. URL: `https://nimo.fyi/api/readwise-webhook` (use the apex domain: `www` answers with a redirect, which webhook POSTs don't follow)
+3. Event: `reader.non_feed_document.created` to tag what you save, or `reader.any_document.created` to also tag every RSS feed item. Don't add `reader.document.tags_updated`; the handler ignores it anyway
+4. Save, copy the secret Readwise shows, add it to Vercel as `READWISE_WEBHOOK_SECRET`, and redeploy
+5. Save any article to Reader. Within a few seconds it should have tags, and Vercel → Logs shows `/api/readwise-webhook`
+
+### 6. Test
+- Terminal chat: visit `https://<your-domain>?mode=terminal`
+- Weekly summary, without sending email or saving to Readwise:
+  ```bash
+  curl -H "Authorization: Bearer $CRON_SECRET" \
+    "https://<your-domain>/api/weekly-summary?email=false&save=false"
+  ```
+- Tag rebalance (also tags anything saved in the last `days` that has no tags; a big number backfills the library). Each run tags a few hundred documents and skips the Opus cleanup until nothing is left untagged, so repeat until `incomplete` is false:
+  ```bash
+  curl -H "Authorization: Bearer $CRON_SECRET" \
+    "https://<your-domain>/api/rebalance-tags?days=3650"
+  ```
+
+## Tagging and the knowledge graph
+
+Readwise holds the taxonomy: it's the set of tags in use.
+
+- **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 gives the document up to 5 tags for its main topics. It's shown the existing tags and told to reuse them, and creates a new tag only when none fits, since the taxonomy is still growing. Documents it can't place get `other`.
+- **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate and overlapping tags and sorts out `other`. Everything is applied straight away; the plan and every before → after change are saved in the trace log.
+
+## LLM trace log (Neon Postgres, free)
+
+Every LLM call (chat, tagging, rebalance, weekly summary) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare.
+
+1. Vercel → your project → Storage → Create Database → Neon → Free plan → connect it to the project. This sets `DATABASE_URL`
+2. Redeploy. The table is created on the first trace
+3. Query it in the Neon console's SQL editor, e.g.
+   ```sql
+   SELECT created_at, subject_id, result FROM llm_traces WHERE kind = 'tagging' ORDER BY created_at DESC;
+   ```
+
+Neon's free plan has 1 GB of storage and suspends the database when idle; the first write after a few idle minutes takes about half a second longer. Chat traces include what visitors typed (never their IP).
+
+Neon doesn't warn before the 1 GB fills up, so the weekly email ends with a line saying how full the log is, which turns into a warning at 80%. Measured sizes: about 3 KB per tagged document, 6 KB per chat message, and 25 KB a week for the rebalance and summary together. If it does fill, new traces stop saving and everything else keeps working; delete old chat traces (`DELETE FROM llm_traces WHERE kind = 'chat' AND created_at < now() - interval '90 days'`) or move to a paid plan.
+
+## Email setup (Resend + nimo.fyi)
+
+Done: `nimo.fyi` is verified in a personal Resend account (free: 3,000 emails/month), and the summary comes from `reader@nimo.fyi`. The `send` and `rsend` records are Resend's bounce handling, not a sending address. To redo it from scratch:
+
+1. Sign up at https://resend.com, then Domains → Add Domain → `nimo.fyi` (region `us-east-1`)
+2. nimo.fyi's DNS is at Squarespace Domains. In Squarespace → Domains → nimo.fyi → DNS → Custom records, add exactly what Resend shows. The host is just the part before `.nimo.fyi`:
+
+   | Type | Host                | Value                                            | Priority |
+   | ---- | ------------------- | ------------------------------------------------ | -------- |
+   | MX   | `send`              | `feedback-smtp.us-east-1.amazonses.com`          | 10       |
+   | TXT  | `send`              | `v=spf1 include:amazonses.com ~all`              |          |
+   | TXT  | `resend._domainkey` | the `p=...` key Resend generates for you         |          |
+   | TXT  | `_dmarc` (optional) | `v=DMARC1; p=none;`                              |          |
+
+   These live on the `send` subdomain, so they don't touch the existing Mailgun MX/SPF records on the root domain.
+3. Click Verify in Resend (usually minutes, can take up to 72 hours)
+4. API Keys → Create, permission "Sending access", domain `nimo.fyi` → set as `RESEND_API_KEY` in Vercel
 
 ## Local Development
 
 ```bash
-# Install dependencies
-yarn install
-
-# Create .env file with your API key
-echo "ANTHROPIC_API_KEY=your_api_key_here" > .env
-
-# Run development server
-yarn start
+nvm use
+npm install
+npm install -g vercel   # once
+cp .env.example .env    # fill in the keys you need
+npm start               # vercel dev: site + API
 ```
 
-This runs the React app AND the serverless function locally, exactly like production.
-
-**Note**: `yarn start` now runs `vercel dev` automatically. You don't need to install the Vercel CLI globally - it's already in the project dependencies.
-
-**Environment Variables for Local Dev:**
-- Create a `.env` file in the root directory
-- Add: `ANTHROPIC_API_KEY=your_key_here`
-- Vercel Dev will automatically load it
-
-Visit: `http://localhost:3000?mode=terminal`
+Visit `http://localhost:3000?mode=terminal`.
 
 ## Architecture
 
 ```
 personal-site/
 ├── api/
-│   └── chat.ts              # Vercel Serverless Function (TypeScript)
+│   ├── chat.ts              # Terminal chat (Claude Haiku 4.5, rate limited)
+│   ├── readwise-webhook.ts  # Tags new Readwise documents from the taxonomy (Haiku 4.5)
+│   ├── rebalance-tags.ts    # Weekly taxonomy rebalance cron (Opus 5.5)
+│   ├── weekly-summary.ts    # Weekly reading summary cron (Opus 5.5)
+│   └── _lib/                # Shared helpers (underscore = not deployed as functions)
 ├── src/                     # React app
-├── vercel.json              # Vercel configuration
-└── package.json             # Dependencies
+├── index.html               # Vite entry
+├── vercel.json              # Framework + cron config
+└── package.json
 ```
 
-## Environment Variables
-
-### For Vercel (Production)
-Set in Vercel dashboard:
-- `ANTHROPIC_API_KEY`
-
-### For Local Development (Vercel Dev)
-Create `.env` in project root:
-```
-ANTHROPIC_API_KEY=your_key_here
-```
+All functions use the Web standard `export default { fetch(request) }` signature, so they need no Vercel-specific packages.
 
 ## Troubleshooting
 
-### Chat shows "ERROR: Backend not running"
-- **On Vercel**: Check environment variables are set in Vercel dashboard
-- **Locally**: Make sure you're running `vercel dev`, not `yarn start`
-- **Locally**: Verify `.env` file exists in root with `ANTHROPIC_API_KEY`
+### Chat shows "ERROR: Connection lost"
+- Check `ANTHROPIC_API_KEY` is set in Vercel and redeploy
+- Check the function logs for `/api/chat` in the Vercel dashboard
 
-### API Key errors
-- Verify the key is set in Vercel environment variables
-- For local dev, check `.env` file in project root
-- Redeploy after adding/changing environment variables
-
-### Serverless function not found
-- Check `api/chat.ts` exists
-- Verify `vercel.json` is present
-- Redeploy the project
-
-## Cost Considerations
-
-- **Vercel**: Free tier includes serverless functions
-- **Anthropic**: Claude Haiku is $0.25 per million input tokens, $1.25 per million output tokens
-- Each chat message costs ~$0.001 (very affordable!)
+### Chat shows "ERROR: Backend not reachable" locally
+- You're on `npm run start:web`; use `npm start` (needs the Vercel CLI) to run the API too
 
 ## Further Customization
 
 ### Change the AI Model
-Edit `api/chat.ts`, line:
-```typescript
-model: 'claude-3-5-haiku-20241022',
-```
-
-Available models:
-- `claude-3-5-haiku-20241022` (fastest, cheapest)
-- `claude-3-5-sonnet-20241022` (balanced)
-- `claude-3-opus-20240229` (most powerful)
-
-### Adjust Response Length
-Edit `api/chat.ts`, line:
-```typescript
-max_tokens: 200,
-```
+Edit `MODEL` in `api/chat.ts` (currently `claude-haiku-4-5`). Model list: https://platform.claude.com/docs/en/about-claude/models/overview
 
 ### Customize System Prompt
 Edit the `SYSTEM_PROMPT` constant in `api/chat.ts`.
+
+### Change the reading models
+- Tagging: `TAGGING_MODEL`, `MAX_TAGS`, and the tagging rules in `SYSTEM_PROMPT` in `api/_lib/tagging.ts`
+- Rebalance: `PLAN_MODEL` and the taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
+- Weekly summary: `SUMMARY_MODEL` in `api/_lib/summary.ts` (Claude via the Anthropic SDK)
+
+The weekly summary and rebalance stream long Opus responses and can take a couple of minutes. That fits in Vercel's 300s limit on Hobby with Fluid compute (on by default for new projects; check Settings → Functions if the cron times out).

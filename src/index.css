@@ -92,6 +92,31 @@ code {
   opacity: 0;
   letter-spacing: 0.5px;
   z-index: 100;
+  /* Big enough to tap comfortably */
+  padding: 0.75rem 1rem;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.terminal-hint:hover,
+.terminal-hint:focus-visible {
+  color: #9ca3af;
+}
+
+/* Phones and tablets have no ~ key, so the hint becomes a tap target */
+.hint-touch {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .hint-keyboard {
+    display: none;
+  }
+
+  .hint-touch {
+    display: inline;
+  }
 }
 
 .key-hint {
@@ -118,10 +143,12 @@ code {
 }
 
 @keyframes glitch {
-  2%, 64% {
+  2%,
+  64% {
     transform: translate(2px, 0) skew(0deg);
   }
-  4%, 60% {
+  4%,
+  60% {
     transform: translate(-2px, 0) skew(0deg);
   }
   62% {
@@ -130,10 +157,12 @@ code {
 }
 
 @keyframes glitchTop {
-  2%, 64% {
+  2%,
+  64% {
     transform: translate(2px, -2px);
   }
-  4%, 60% {
+  4%,
+  60% {
     transform: translate(-2px, 2px);
   }
   62% {
@@ -142,10 +171,12 @@ code {
 }
 
 @keyframes glitchBottom {
-  2%, 64% {
+  2%,
+  64% {
     transform: translate(-2px, 0);
   }
-  4%, 60% {
+  4%,
+  60% {
     transform: translate(-2px, 0);
   }
   62% {
@@ -190,7 +221,11 @@ code {
   top: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(180deg, rgba(0, 255, 0, 0.2) 0%, rgba(0, 255, 0, 0.05) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(0, 255, 0, 0.2) 0%,
+    rgba(0, 255, 0, 0.05) 100%
+  );
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
   letter-spacing: 2px;
@@ -240,10 +275,12 @@ code {
 }
 
 @keyframes blink {
-  0%, 50% {
+  0%,
+  50% {
     opacity: 1;
   }
-  51%, 100% {
+  51%,
+  100% {
     opacity: 0;
   }
 }
@@ -300,7 +337,8 @@ code {
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -329,15 +367,6 @@ code {
   align-items: center;
 }
 
-.input-measure {
-  position: absolute;
-  visibility: hidden;
-  white-space: pre;
-  font-family: 'Share Tech Mono', monospace;
-  font-size: 1rem;
-  pointer-events: none;
-}
-
 .chat-input {
   flex: 1;
   background: transparent;
@@ -346,6 +375,8 @@ code {
   color: #00ff00;
   font-family: 'Share Tech Mono', monospace;
   font-size: 1rem;
+  /* Keeps every character exactly 1ch wide so the fake cursor lines up */
+  letter-spacing: normal;
   padding: 0;
   caret-color: transparent;
   position: relative;
