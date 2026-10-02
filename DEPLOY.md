@@ -86,7 +86,7 @@ ORDER BY r.created_at, title;
 
 ## Reading synthesis
 
-`/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 31 days (`?days=` up to 183 for a one-off, e.g. 92 for a quarter). Claude Opus 5.5 gets each document's title, source, date, tags, Readwise summary, how far you got, and your notes and highlights, and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
+`/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 90 days, so each month's email shows the longer arc (`?days=` from 1 to 183 for a one-off over another window). The first one, over 92 days with 89 documents, took about 3 minutes. Claude Opus 5.5 gets each document's title, source, date, tags, Readwise summary, how far you got, and your notes and highlights, and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
 
 ## LLM trace log (Neon Postgres, free)
 

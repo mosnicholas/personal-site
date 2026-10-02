@@ -16,12 +16,13 @@ import {
  * Feed items are left out unless they were saved to the library.
  *
  * Can also be triggered manually with the same Authorization header:
- * - days: How far back to look (default: 31, max: 183), e.g. 92 for a quarter
+ * - days: How far back to look (default: 90, max: 183)
  * - email: Whether to send the email (default: true)
  * - dry_run: Report what the model would get, without calling it
  */
 
-const DEFAULT_DAYS = 31;
+// Each month looks back a quarter, for the longer arc rather than one month
+const DEFAULT_DAYS = 90;
 const MAX_DAYS = 183;
 const LIBRARY_LOCATIONS: Location[] = ['new', 'later', 'shortlist', 'archive'];
 
