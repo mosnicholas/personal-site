@@ -18,7 +18,7 @@ Cost isn't the reason to do this. Sonnet costs about $0.026 per summary, under $
 ## What we already have
 
 - **370 saved documents with full text** in `document_texts`. Median about 10.8k characters (about 2.7k tokens), 90th percentile 28k, longest 154k (about 38k tokens). 182 are tweets and threads, 167 articles, 13 videos (transcripts), 3 PDFs, a few emails and RSS posts.
-- **A Sonnet 5.5 summary and key points for each** (`documents.summary`, `key_points`, `summary_model = 'claude-sonnet-5-5/2'`). Average 5.4k input tokens, 1.5k output tokens, $0.026 and 13 seconds per summary.
+- **A Sonnet 5.5 summary and key points for each** (`documents.summary`, `key_points`; `summary_model` is `claude-sonnet-5-5/3` once the length fix below has been rolled out, and every `/2` summary stays in `llm_traces`). Average 5.4k input tokens, 1.5k output tokens, $0.026 and 13 seconds per summary.
 - **The earlier Haiku 4.5 summaries** in `llm_traces` (kind `document_summary`). Not a fair comparison: Haiku had a different prompt and only the first 40k characters.
 - **The exact request for every call** in `llm_traces.request`, so any candidate can be run on identical inputs, and dated prices in `model_prices` to cost them.
 - **A side-by-side page** (the Haiku vs Sonnet artifact). It compares length only, not quality.
@@ -34,7 +34,9 @@ Short documents get summaries as long as the document. Measured on the 370:
 | 10k-30k | 165 | 0.23 | 0 |
 | 30k+ | 30 | 0.09 | 0 |
 
-On short threads and changelogs, Sonnet paraphrases every point instead of compressing, even though the prompt says "a short post may need two or three sentences". The spot-checked examples were faithful, just not shorter. The conciseness grader should catch this, and it's the first thing to fix.
+On short threads and changelogs, Sonnet paraphrases every point instead of compressing, even though the prompt said "a short post may need two or three sentences". The spot-checked examples were faithful, just not shorter.
+
+**Fixed before this plan started (`SUMMARY_VERSION` `claude-sonnet-5-5/3`, 2026-10-02):** each request now tells the model the document's word count and limits of about a tenth of it (summary words, 40 minimum; key points about one per 300 words, at most 15), and documents of 150 words or fewer are stored as their own summary with no model call. The eval should confirm the fix didn't cost faithfulness or coverage: compression is exactly where those trade off.
 
 ## How summaries are evaluated now
 
@@ -143,8 +145,8 @@ All on the same 100 documents, measuring cost and latency from `llm_traces`:
 
 | Candidate | Why |
 | --------- | --- |
-| Sonnet 5.5, current prompt (`/2`) | The baseline |
-| Sonnet 5.5, prompt fixed for short documents | The known issue; likely the cheapest win |
+| Sonnet 5.5, current prompt (`/3`, with length limits) | The baseline |
+| Sonnet 5.5, previous prompt (`/2`, no limits) | What the length fix cost or gained |
 | Sonnet 5.5 at `low` effort | More summarizer thinking can hurt faithfulness, and it costs more |
 | Sonnet 5.5 with Citations | Every claim traceable to the source. Needs plain-text output instead of structured outputs (incompatible) |
 | Haiku 4.5, same prompt and full text | The fair rematch; half the price |

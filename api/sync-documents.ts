@@ -13,6 +13,8 @@ import { summarizeMissing, syncDocuments } from './_lib/sync.js';
  * resuming where the last stopped. Run it by hand with the same header until
  * `incomplete` is false. Options:
  * - summarize: Whether to write summaries this run (default: true)
+ * - limit: Most summaries to write this run, e.g. 12 to check a prompt change
+ *   before redoing the library (default: as many as fit)
  */
 
 // Vercel stops functions at 300s; a summary in flight can take a minute
@@ -32,14 +34,15 @@ export default {
     try {
       const started = Date.now();
       const deadline = started + TIME_BUDGET_MS;
-      const shouldSummarize =
-        new URL(request.url).searchParams.get('summarize') !== 'false';
+      const params = new URL(request.url).searchParams;
+      const shouldSummarize = params.get('summarize') !== 'false';
+      const limit = Number(params.get('limit')) || Infinity;
 
       const listing = await syncDocuments(
         shouldSummarize ? started + TIME_BUDGET_MS * LISTING_SHARE : deadline,
       );
       const summaries = shouldSummarize
-        ? await summarizeMissing(deadline)
+        ? await summarizeMissing(deadline, limit)
         : undefined;
 
       const report = {

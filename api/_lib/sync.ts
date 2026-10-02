@@ -92,10 +92,14 @@ export async function syncDocuments(
 
 /**
  * Summarize saved documents that don't have a summary from the current
- * SUMMARY_VERSION (missing first, then outdated), from their stored text,
- * fetching and storing it first if needed
+ * SUMMARY_VERSION (missing first, then outdated, newest saves first), from
+ * their stored text, fetching and storing it first if needed. `limit` caps
+ * how many this run tries, e.g. to check a prompt change on a few first
  */
-export async function summarizeMissing(deadline: number): Promise<{
+export async function summarizeMissing(
+  deadline: number,
+  limit = Infinity,
+): Promise<{
   summarized: number;
   failed: number;
   remaining: number;
@@ -105,7 +109,7 @@ export async function summarizeMissing(deadline: number): Promise<{
   let throttled = false;
   const tried = new Set<string>();
 
-  while (Date.now() < deadline && !throttled) {
+  while (Date.now() < deadline && !throttled && tried.size < limit) {
     const batch = (
       await documentsNeedingSummary(
         SUMMARY_VERSION,
@@ -115,39 +119,44 @@ export async function summarizeMissing(deadline: number): Promise<{
     if (batch.length === 0) break;
 
     await Promise.all(
-      batch.slice(0, SUMMARY_CONCURRENCY).map(async (document) => {
-        const { id } = document;
-        tried.add(id);
-        try {
-          let text = await getDocumentText(id);
-          if (!text) {
-            const article = await fetchArticle(id, { withHtmlContent: true });
-            if (!article) throw new Error('not found');
-            text = htmlToText(article.html_content ?? '');
-            if (text.length >= MIN_TEXT_CHARS) await saveDocumentText(id, text);
+      batch
+        .slice(0, Math.min(SUMMARY_CONCURRENCY, limit - tried.size))
+        .map(async (document) => {
+          const { id } = document;
+          tried.add(id);
+          try {
+            let text = await getDocumentText(id);
+            if (!text) {
+              const article = await fetchArticle(id, { withHtmlContent: true });
+              if (!article) throw new Error('not found');
+              text = htmlToText(article.html_content ?? '');
+              if (text.length >= MIN_TEXT_CHARS)
+                await saveDocumentText(id, text);
+            }
+            if (text.length < MIN_TEXT_CHARS) {
+              throw new Error(`only ${text.length} characters of text`);
+            }
+            const summary = await summarizeDocument(id, document, text);
+            await saveDocumentSummary(id, summary, SUMMARY_VERSION);
+            summarized += 1;
+          } catch (error) {
+            // Rate limits and overload aren't the document's fault: stop this
+            // run without using up its attempts, and let the next run retry
+            if (
+              error instanceof Anthropic.APIError &&
+              (error.status === 429 || error.status === 529)
+            ) {
+              console.warn(
+                `Anthropic is throttling (${error.status}), stopping`,
+              );
+              throttled = true;
+              return;
+            }
+            console.warn(`Could not summarize ${id}:`, error);
+            await recordSummaryFailure(id);
+            failed += 1;
           }
-          if (text.length < MIN_TEXT_CHARS) {
-            throw new Error(`only ${text.length} characters of text`);
-          }
-          const summary = await summarizeDocument(id, document, text);
-          await saveDocumentSummary(id, summary, SUMMARY_VERSION);
-          summarized += 1;
-        } catch (error) {
-          // Rate limits and overload aren't the document's fault: stop this
-          // run without using up its attempts, and let the next run retry
-          if (
-            error instanceof Anthropic.APIError &&
-            (error.status === 429 || error.status === 529)
-          ) {
-            console.warn(`Anthropic is throttling (${error.status}), stopping`);
-            throttled = true;
-            return;
-          }
-          console.warn(`Could not summarize ${id}:`, error);
-          await recordSummaryFailure(id);
-          failed += 1;
-        }
-      }),
+        }),
     );
   }
 
