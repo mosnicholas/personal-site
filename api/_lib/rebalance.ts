@@ -1,10 +1,12 @@
 /**
  * Weekly taxonomy rebalance, run by api/rebalance-tags.ts:
  * 1. Tag documents the webhook missed (untagged and recently updated)
- * 2. Ask Claude Opus 5.5 for a plan: merge duplicate tags, and tag the
- *    documents in `other`, creating new tags for themes that keep coming up
+ * 2. Ask Claude Opus 5.5 for a plan: merge duplicate or overlapping tags
+ *    (the save-time tagger creates new ones), and tag the documents in `other`
  * 3. Rewrite the tags on every affected document in bulk
  */
+
+import type Anthropic from '@anthropic-ai/sdk';
 
 import { getAnthropic } from './anthropic.js';
 import {
@@ -16,6 +18,7 @@ import {
 } from './readwise.js';
 import { classifyDocument } from './tagging.js';
 import { normalizeTag, OTHER_TAG } from './taxonomy.js';
+import { recordTrace } from './traces.js';
 
 const PLAN_MODEL = 'claude-opus-5-5';
 const CLASSIFY_CONCURRENCY = 5;
@@ -24,9 +27,9 @@ const SWEEP_RESERVE_MS = 150_000;
 // Only start planning if a slow Opus response still fits
 const PLAN_RESERVE_MS = 120_000;
 
-const SYSTEM_PROMPT = `You curate the tag taxonomy of a personal reading library in Readwise Reader. A classifier tags new documents automatically and only sees each tag's name, so names must be self-explanatory: lowercase kebab-case, specific enough to be useful, broad enough to group related reading (for example \`machine-learning\`, \`startup-fundraising\`, \`home-cooking\`).
+const SYSTEM_PROMPT = `You curate the tag taxonomy of a personal reading library in Readwise Reader. A tagger labels documents as they're saved: it reuses existing tags when they fit and creates new ones otherwise, so each week brings new tags, and some duplicate or overlap existing ones. Tag names must be self-explanatory: lowercase kebab-case, specific enough to be useful, broad enough to group related reading (for example \`machine-learning\`, \`startup-fundraising\`, \`home-cooking\`).
 
-Documents whose main subject no tag covers are tagged \`other\`. Each week you get the current tags and the documents in \`other\`, and you return:
+Documents the tagger couldn't place are tagged \`other\`. Each week you get the current tags and the documents in \`other\`, and you return:
 
 1. merges: tags that mean the same thing or nearly so - synonyms, singular and plural, formatting variants, or a tag too narrow to stand on its own next to a broader one. List the tags to retire in \`from\` and the tag they become in \`into\`, which can be an existing tag or a clearer new name. Keep distinct concepts separate even when they're related. Never merge into or out of \`other\`. Leave out tags that are fine as they are.
 2. other_documents: tags for each document in \`other\`, using tag names as they'll be after your merges. Use existing tags where they fit. Create a new tag when it would apply to at least two of these documents or clearly names a lasting interest of this reader. If nothing fits yet, return an empty list for that document; it stays in \`other\` until similar documents arrive.`;
@@ -89,25 +92,33 @@ const isLibraryDocument = (article: Article) =>
 
 const unique = (tags: string[]) => [...new Set(tags.filter(Boolean))];
 
+interface PlanCall {
+  plan: RebalancePlan;
+  request: unknown;
+  response: Anthropic.Beta.Messages.BetaMessage;
+  latencyMs: number;
+}
+
+const today = () => new Date().toISOString().split('T')[0];
+
 async function planRebalance(
   taxonomy: string[],
   otherDocuments: Article[],
-): Promise<RebalancePlan> {
-  // Streaming keeps a long response from hitting HTTP timeouts
-  const stream = getAnthropic().beta.messages.stream({
+): Promise<PlanCall> {
+  const request = {
     model: PLAN_MODEL,
     max_tokens: 32000,
     output_config: {
-      effort: 'medium',
-      format: { type: 'json_schema', schema: PLAN_SCHEMA },
+      effort: 'medium' as const,
+      format: { type: 'json_schema' as const, schema: PLAN_SCHEMA },
     },
     // If a safety classifier declines, retry on Anthropic's recommended fallback model
     betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
+    fallbacks: 'default' as const,
     system: SYSTEM_PROMPT,
     messages: [
       {
-        role: 'user',
+        role: 'user' as const,
         content: JSON.stringify(
           {
             tags: taxonomy,
@@ -124,20 +135,38 @@ async function planRebalance(
         ),
       },
     ],
-  });
-  const message = await stream.finalMessage();
+  };
 
-  if (
-    message.stop_reason === 'refusal' ||
-    message.stop_reason === 'max_tokens'
-  ) {
-    throw new Error(`Rebalance plan incomplete (${message.stop_reason})`);
+  const started = Date.now();
+  let response: Anthropic.Beta.Messages.BetaMessage | undefined;
+  try {
+    // Streaming keeps a long response from hitting HTTP timeouts
+    response = await getAnthropic()
+      .beta.messages.stream(request)
+      .finalMessage();
+    if (
+      response.stop_reason === 'refusal' ||
+      response.stop_reason === 'max_tokens'
+    ) {
+      throw new Error(`Rebalance plan incomplete (${response.stop_reason})`);
+    }
+    const text = response.content
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('');
+    const plan = JSON.parse(text) as RebalancePlan;
+    return { plan, request, response, latencyMs: Date.now() - started };
+  } catch (error) {
+    await recordTrace({
+      kind: 'rebalance',
+      subjectId: today(),
+      model: PLAN_MODEL,
+      request,
+      response,
+      latencyMs: Date.now() - started,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
-
-  const text = message.content
-    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-    .join('');
-  return JSON.parse(text) as RebalancePlan;
 }
 
 export async function rebalanceTags({
@@ -179,6 +208,7 @@ export async function rebalanceTags({
     const results = await Promise.all(
       batch.map((doc) =>
         classifyDocument(
+          doc.id,
           {
             title: doc.title,
             author: doc.author,
@@ -212,14 +242,15 @@ export async function rebalanceTags({
     if (base.get(doc.id)?.includes(OTHER_TAG)) otherDocuments.set(doc.id, doc);
   }
 
-  let plan: RebalancePlan = { merges: [], other_documents: [] };
+  let planCall: PlanCall | undefined;
   if (
     (taxonomy.length > 0 || otherDocuments.size > 0) &&
     !outOfTime(PLAN_RESERVE_MS)
   ) {
-    plan = await planRebalance(taxonomy, [...otherDocuments.values()]);
-    console.log('Rebalance plan:', JSON.stringify(plan));
+    planCall = await planRebalance(taxonomy, [...otherDocuments.values()]);
+    console.log('Rebalance plan:', JSON.stringify(planCall.plan));
   }
+  const plan = planCall?.plan ?? { merges: [], other_documents: [] };
 
   // 3. Merges, as old name -> new name
   const renames = new Map<string, string>();
@@ -278,6 +309,29 @@ export async function rebalanceTags({
   }
 
   const { updated, failed } = await bulkUpdateTags(updates);
+
+  // Keep the plan and every change it caused (before -> after), so a run can
+  // be audited or undone, and plans compared across models
+  if (planCall) {
+    await recordTrace({
+      kind: 'rebalance',
+      subjectId: today(),
+      model: PLAN_MODEL,
+      request: planCall.request,
+      response: planCall.response,
+      result: {
+        plan,
+        renames: Object.fromEntries(renames),
+        changes: updates.map(({ id, tags }) => ({
+          id,
+          before: current.get(id) ?? [],
+          after: tags,
+        })),
+        failed,
+      },
+      latencyMs: planCall.latencyMs,
+    });
+  }
 
   return {
     missedDocumentsTagged,

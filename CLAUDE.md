@@ -13,6 +13,7 @@ Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Three parts:
 - **Vercel** for hosting; `/api/*.ts` are Vercel Functions
 - **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
 - **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and tagging, `claude-opus-5-5` for the weekly tag rebalance and summary
+- **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log
 - **Resend** for email (personal account, `nimo.fyi` verified; sender `reader@nimo.fyi`, recipient `WEEKLY_SUMMARY_RECIPIENT_EMAIL`)
 - ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
 
@@ -48,8 +49,9 @@ personal-site/
 │       ├── readwise.ts        # Readwise Reader v3 client (list, tags, bulk update)
 │       ├── rebalance.ts       # Weekly rebalance: sweep, Opus plan, bulk rewrite
 │       ├── summary.ts         # Weekly summary via Claude Opus 5.5 (streaming)
-│       ├── tagging.ts         # Haiku tagger, enum-constrained to existing tags + `other`
-│       └── taxonomy.ts        # `other` tag, tag normalization, cached tag list
+│       ├── tagging.ts         # Haiku tagger: reuses existing tags, creates new ones when needed
+│       ├── taxonomy.ts        # `other` tag, tag normalization, cached tag list
+│       └── traces.ts          # Saves every LLM call to Postgres (`llm_traces`)
 ├── vite.config.ts
 ├── eslint.config.js
 ├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
@@ -72,10 +74,14 @@ personal-site/
 
 ### Tag taxonomy (knowledge graph)
 - Readwise is the source of truth: the taxonomy is the set of tags in use, normalized to lowercase kebab-case
-- New documents only get existing tags: Haiku 4.5 picks up to 5 main-topic tags, and the structured-output schema's `enum` is the current tags plus `other`, so it can't invent one. `other` means nothing fits or the main subject has no tag yet
-- Decision models (TypeSafe Jev, OpenAI's Decisions API) were considered for the save-time step; revisit once a few weeks of Haiku-assigned tags exist to evaluate them against
-- Weekly, Opus 5.5 returns a structured plan (`merges`, `other_documents`); code validates it (no merging into/out of `other`, only known tags and documents) and rewrites tags with Readwise's bulk update. New tags only appear here, once a theme covers 2+ documents
+- The taxonomy is still being created, so the save-time tagger (Haiku 4.5) may create tags: it's shown the existing tags, told to reuse them, and creates one only when none covers a main topic. `other` is for documents it can't place. Don't swap in a closed-set classifier (decision models like Jev) while tags are still being created
+- Weekly, Opus 5.5 returns a structured plan (`merges`, `other_documents`); code validates it (no merging into/out of `other`, only known tags and documents) and rewrites tags with Readwise's bulk update
 - Classifier only sees tag names, so names must be self-explanatory
+
+### LLM traces
+- Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `rebalance`, `weekly_summary`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
+- Rebalance traces also store every applied change (`before` → `after` tags per document), which is the undo log
+- Tracing never breaks the caller; without `DATABASE_URL` it's skipped. New LLM calls should be traced too
 
 ### API functions
 - All use the Web standard `export default { fetch(request: Request) }` signature - no `@vercel/node`

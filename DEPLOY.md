@@ -15,6 +15,7 @@ In Vercel project settings, add these for Production (and Preview if you want th
 | Variable                  | Used by                       | Where to get it                                       |
 | ------------------------- | ----------------------------- | ----------------------------------------------------- |
 | `ANTHROPIC_API_KEY`       | chat, tagging, rebalance, summary | https://console.anthropic.com/                    |
+| `DATABASE_URL`            | LLM trace log                 | Set automatically by the Neon integration (below)     |
 | `READWISE_API_KEY`        | webhook + weekly summary      | https://readwise.io/access_token                       |
 | `READWISE_WEBHOOK_SECRET` | `/api/readwise-webhook`       | Readwise generates it (step 5)                        |
 | `RESEND_API_KEY`          | weekly summary email          | Resend → API Keys (see "Email setup" below)           |
@@ -62,8 +63,21 @@ The endpoint has to be live in production first (step 3).
 
 Readwise holds the taxonomy: it's the set of tags in use.
 
-- **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 picks up to 5 tags that name a main topic. Structured outputs restrict it to your existing tags plus `other`, so it can't invent tags. If nothing fits, or the main subject has no tag yet, the document gets `other`.
-- **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate tags and tags the `other` documents, creating a new tag once a theme shows up in at least two of them. Everything is applied straight away; the plan is in the function logs.
+- **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 gives the document up to 5 tags for its main topics. It's shown the existing tags and told to reuse them, and creates a new tag only when none fits, since the taxonomy is still growing. Documents it can't place get `other`.
+- **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate and overlapping tags and sorts out `other`. Everything is applied straight away; the plan and every before → after change are saved in the trace log.
+
+## LLM trace log (Neon Postgres, free)
+
+Every LLM call (chat, tagging, rebalance, weekly summary) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare.
+
+1. Vercel → your project → Storage → Create Database → Neon → Free plan → connect it to the project. This sets `DATABASE_URL`
+2. Redeploy. The table is created on the first trace
+3. Query it in the Neon console's SQL editor, e.g.
+   ```sql
+   SELECT created_at, subject_id, result FROM llm_traces WHERE kind = 'tagging' ORDER BY created_at DESC;
+   ```
+
+Neon's free plan has 1 GB of storage and suspends the database when idle; the first write after a few idle minutes takes about half a second longer. Chat traces include what visitors typed (never their IP).
 
 ## Email setup (Resend + nimo.fyi)
 

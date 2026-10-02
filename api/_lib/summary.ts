@@ -2,13 +2,18 @@
  * Weekly reading summary, written by Claude Opus 5.5
  */
 
+import type Anthropic from '@anthropic-ai/sdk';
+
 import { getAnthropic } from './anthropic.js';
+import { tracedCall } from './traces.js';
 
 const SUMMARY_MODEL = 'claude-opus-5-5';
 
 export interface WeeklySummaryResult {
   html: string;
   subject: string;
+  /** The Readwise documents the summary covers */
+  articleIds: string[];
 }
 
 /**
@@ -16,6 +21,7 @@ export interface WeeklySummaryResult {
  */
 export async function generateWeeklySummary(
   articles: {
+    id: string;
     title: string;
     author: string | null;
     url: string;
@@ -61,19 +67,38 @@ ${articleList}
 
 Generate a comprehensive weekly reading summary.`;
 
-  // Streaming keeps a long response from hitting HTTP timeouts
-  const stream = getAnthropic().beta.messages.stream({
+  const request = {
     model: SUMMARY_MODEL,
     max_tokens: 16000,
-    output_config: { effort: 'medium' },
+    output_config: { effort: 'medium' as const },
     // If a safety classifier declines, retry on Anthropic's recommended fallback model
     betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
+    fallbacks: 'default' as const,
     system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
-  });
-  const message = await stream.finalMessage();
+    messages: [{ role: 'user' as const, content: userPrompt }],
+  };
 
+  return tracedCall(
+    {
+      kind: 'weekly_summary',
+      subjectId: new Date().toISOString().split('T')[0],
+      model: SUMMARY_MODEL,
+      request,
+    },
+    // Streaming keeps a long response from hitting HTTP timeouts
+    () => getAnthropic().beta.messages.stream(request).finalMessage(),
+    (message) =>
+      parseSummary(
+        message,
+        articles.map((a) => a.id),
+      ),
+  );
+}
+
+function parseSummary(
+  message: Anthropic.Beta.Messages.BetaMessage,
+  articleIds: string[],
+): WeeklySummaryResult {
   if (message.stop_reason === 'refusal') {
     throw new Error(
       `Summary request was declined (${message.stop_details?.category ?? 'no category'})`,
@@ -126,5 +151,5 @@ ${html}
 </html>`;
   }
 
-  return { html, subject };
+  return { html, subject, articleIds };
 }

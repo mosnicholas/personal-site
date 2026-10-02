@@ -72,6 +72,7 @@ export default {
 
       const summary = await generateWeeklySummary(
         articlesToSummarize.map((a) => ({
+          id: a.id,
           title: a.title,
           author: a.author,
           url: a.url,

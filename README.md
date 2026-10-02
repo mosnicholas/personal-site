@@ -16,8 +16,9 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - Answer questions about me in terminal-style
 
 ### Reading Workflows
-- `/api/readwise-webhook` - tags new Readwise Reader documents from my existing tags (Claude Haiku 4.5)
-- `/api/rebalance-tags` - weekly cron where Claude Opus 5.5 merges duplicate tags and turns recurring themes into new ones
+- `/api/readwise-webhook` - tags new Readwise Reader documents, reusing existing tags and creating new ones when needed (Claude Haiku 4.5)
+- `/api/rebalance-tags` - weekly cron where Claude Opus 5.5 merges duplicate and overlapping tags
+- Every LLM call is saved to Postgres (request, response, result) for comparing models later
 - `/api/weekly-summary` - weekly cron that emails a Claude Opus 5.5 summary of my reading
 
 ## Tech Stack
@@ -29,6 +30,7 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - **Vercel Functions** - Backend API (`/api`)
 - **Anthropic Claude** - Haiku 4.5 for terminal chat and tagging, Opus 5.5 for tag rebalancing and reading summaries
 - **Resend** - Weekly summary email
+- **Neon Postgres** - LLM trace log
 - **Share Tech Mono** - Cool terminal font
 
 ## Quick Start

@@ -91,6 +91,7 @@ export default {
       }
 
       const tags = await classifyDocument(
+        payload.id,
         {
           title: payload.title,
           author: payload.author ?? null,

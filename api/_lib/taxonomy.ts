@@ -1,11 +1,9 @@
 /**
- * The tag taxonomy: the tags the classifier may apply to new documents.
+ * The tag taxonomy: the tags in use in Readwise, which is the source of truth.
  *
- * Readwise is the source of truth - the taxonomy is the set of tags in use.
- * New documents only ever get existing tags. When none fit, or the main
- * subject isn't covered, the document also gets `other`; the weekly
- * rebalance (api/rebalance-tags.ts) merges tags and turns recurring themes in
- * `other` into new tags.
+ * The save-time tagger reuses these where it can and creates new ones when
+ * nothing fits; documents it can't place get `other`. The weekly rebalance
+ * (api/rebalance-tags.ts) merges duplicates and sorts out `other`.
  */
 
 import { fetchTags } from './readwise.js';

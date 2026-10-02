@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 import { getAnthropic } from './_lib/anthropic.js';
 import { clientIp, createRateLimiter } from './_lib/rate-limit.js';
+import { tracedCall } from './_lib/traces.js';
 
 const MODEL = 'claude-haiku-4-5';
 const MAX_MESSAGE_LENGTH = 500;
@@ -219,25 +220,29 @@ export default {
       return errorResponse('Chat is not configured', 500);
     }
 
+    const params = {
+      model: MODEL,
+      max_tokens: 1024,
+      // Caches the growing conversation once it's long enough to qualify
+      cache_control: { type: 'ephemeral' as const },
+      system: SYSTEM_PROMPT,
+      messages: conversation.messages,
+    };
+
     try {
-      const response = await getAnthropic().messages.create({
-        model: MODEL,
-        max_tokens: 1024,
-        // Caches the growing conversation once it's long enough to qualify
-        cache_control: { type: 'ephemeral' },
-        system: SYSTEM_PROMPT,
-        messages: conversation.messages,
-      });
+      // Traces keep the conversation and reply, not the visitor's IP
+      const reply = await tracedCall(
+        { kind: 'chat', model: MODEL, request: params },
+        () => getAnthropic().messages.create(params),
+        (response) =>
+          response.content
+            .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+            .join('\n')
+            .trim() ||
+          "I can't answer that one. Type 'help' to see what I can do.",
+      );
 
-      const text = response.content
-        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-        .join('\n')
-        .trim();
-
-      return Response.json({
-        response:
-          text || "I can't answer that one. Type 'help' to see what I can do.",
-      });
+      return Response.json({ response: reply });
     } catch (error) {
       if (error instanceof Anthropic.RateLimitError) {
         return errorResponse('Too many requests. Try again in a minute.', 429);
