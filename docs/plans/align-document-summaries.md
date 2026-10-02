@@ -40,7 +40,20 @@ On short threads and changelogs, Sonnet paraphrases every point instead of compr
 
 A first fix (`/3`) gave the model a word limit of about a tenth of the document. It was never rolled out, because the reader doesn't want length rules. Research also suggests they backfire: replacing "no longer than 300 words" with "clear and concise" made LLM summaries up to 150 words shorter ([2410.13961](https://arxiv.org/abs/2410.13961)), and models follow length targets loosely anyway ([2501.00233](https://arxiv.org/abs/2501.00233)). Anthropic's guidance is to explain why rather than add rules ([prompting best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices)).
 
-`/4` is a short prompt that says what summaries are for (recall what a piece said, decide what to read in full, tag and connect documents), asks for the main points and what supports them, "much quicker to read than the document itself", and leaves length to the model. It asks for no key points. Documents of 150 words or fewer are stored as their own summary, with no model call. The eval should confirm this didn't cost faithfulness or coverage: compression is exactly where those trade off.
+`/4` is a short prompt that says what summaries are for (recall what a piece said, decide what to read in full, tag and connect documents), asks for the main points and what supports them, "much quicker to read than the document itself", and leaves length to the model. It asks for no key points. Documents of 300 words or fewer are stored as their own summary, with no model call.
+
+Tested on 35 documents stratified by length, before rollout (median summary as a share of the document):
+
+| Document length | Documents | `/2` summary + key points | `/4` summary |
+| --------------- | --------- | ------------------------- | ------------ |
+| 151-400 words | 6 | 122% | 63% |
+| 401-800 | 5 | 94% | 49% |
+| 801-1,500 | 6 | 50% | 21% |
+| 1,500-3,000 | 6 | 34% | 15% |
+| 3,000-6,000 | 6 | 18% | 8% |
+| 6,000+ | 6 | 10% | 4% |
+
+Total output fell to 44% of `/2`. Adding the document's word count to the input (no instruction) changed nothing on short posts, so the model seems to have a floor of roughly 150-250 words; hence the 300-word cutoff (the reader chose it over 500). The eval should confirm this didn't cost faithfulness or coverage: compression is exactly where those trade off.
 
 ## How summaries are evaluated now
 

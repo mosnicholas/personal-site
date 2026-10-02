@@ -21,9 +21,10 @@ export const SUMMARY_VERSION = `${SUMMARY_MODEL}/4`;
 const MAX_TEXT_CHARS = 600_000;
 // Below this there's nothing worth summarizing beyond the title
 export const MIN_TEXT_CHARS = 200;
-// Up to this length (a tweet, a short post) the text is its own summary: it
-// reads in under a minute, and a model's version would only paraphrase it
-const VERBATIM_MAX_WORDS = 150;
+// Up to this length (a tweet, a short thread) the text is its own summary: it
+// reads in about a minute. Tested on 35 documents, the model's summaries of
+// posts this short ran 50-85% of their length whatever the prompt said
+const VERBATIM_MAX_WORDS = 300;
 
 export const countWords = (text: string) =>
   text.split(/\s+/).filter(Boolean).length;
