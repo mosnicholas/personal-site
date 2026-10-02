@@ -39,15 +39,13 @@ export default {
     const payload = (await request
       .json()
       .catch(() => null)) as WebhookPayload | null;
-    if (!payload) {
-      return errorResponse('Invalid JSON body', 400);
-    }
 
     // Only tag new documents. Writing tags triggers `tags_updated`, so
     // reacting to other events could loop forever. Skipping does nothing, so
-    // it needs no secret, which also lets Readwise's "Test Endpoint" pass.
-    if (!payload.event_type?.endsWith('document.created')) {
-      return Response.json({ skipped: true, eventType: payload.event_type });
+    // it needs no secret. That includes bodies that aren't JSON events, like
+    // Readwise's "Test Endpoint" request, which must get a 2xx.
+    if (!payload?.event_type?.endsWith('document.created')) {
+      return Response.json({ skipped: true, eventType: payload?.event_type });
     }
 
     // Readwise only shows the secret after the webhook is created, and it
