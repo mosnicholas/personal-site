@@ -1,0 +1,790 @@
+/* Reading page (/reading). Imported by the lazy ReadingPage, so it ships in
+   that chunk and never in the landing page's CSS. */
+
+.reading {
+  --reading-ink: #fff;
+  --reading-ink-2: #d1d5db;
+  --reading-muted: #9ca3af;
+  --reading-faint: #6b7280;
+  --reading-ghost: #4b5563;
+  --reading-line: #1f2937;
+  --reading-hairline: #161616;
+  --reading-surface: #0a0a0a;
+
+  max-width: 1480px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 32px 48px 72px;
+  letter-spacing: 0.01em;
+  color: var(--reading-ink);
+}
+
+.reading :focus-visible {
+  outline: 1px solid var(--reading-muted);
+  outline-offset: 2px;
+}
+
+/* The panel takes focus when it opens; its contents show focus, not the box */
+.reading .reading-panel:focus-visible {
+  outline: none;
+}
+
+/* Header */
+.reading-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 24px;
+  margin-bottom: 28px;
+}
+
+.reading-title {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.reading-title a {
+  color: var(--reading-ink);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.reading-title a:hover {
+  color: var(--reading-muted);
+}
+
+.reading-title-sep {
+  color: var(--reading-ghost);
+  margin: 0 0.6ch;
+  font-weight: 400;
+}
+
+.reading-stats {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--reading-muted);
+  letter-spacing: 0.02em;
+}
+
+/* Shared bits */
+.reading-heading {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--reading-faint);
+  letter-spacing: 0.14em;
+  margin-bottom: 10px;
+}
+
+.reading-swatch {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.reading-line-key {
+  display: block;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.reading-note {
+  margin-top: 16px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--reading-faint);
+}
+
+.reading-button {
+  font: inherit;
+  color: var(--reading-ink);
+  background: transparent;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.reading-button:hover {
+  border-color: var(--reading-muted);
+}
+
+.reading-text-button {
+  font: inherit;
+  color: var(--reading-ink);
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.is-loading {
+  animation: readingPulse 1.6s ease-in-out infinite;
+}
+
+/* Loading, error and empty states sit where the map will be */
+.reading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--reading-hairline);
+  border-radius: 12px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--reading-muted);
+  text-align: center;
+}
+
+/* Main column + panel */
+.reading-main {
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .reading-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 40px;
+    align-items: start;
+  }
+}
+
+/* Cluster legend */
+.cluster-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.cluster-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+  color: var(--reading-ink-2);
+  background: transparent;
+  border: 1px solid var(--reading-line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    opacity 0.2s,
+    border-color 0.2s,
+    color 0.2s;
+}
+
+.cluster-chip:hover {
+  color: var(--reading-ink);
+  border-color: #374151;
+}
+
+.cluster-chip[aria-pressed='true'] {
+  color: var(--reading-ink);
+  border-color: var(--reading-muted);
+  background: #111;
+}
+
+.cluster-chip.is-muted {
+  opacity: 0.45;
+}
+
+.cluster-chip-count {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--reading-faint);
+}
+
+/* Tag map */
+.tag-map {
+  position: relative;
+  width: 100%;
+  animation: readingFadeIn 0.5s ease-out;
+}
+
+.tag-map svg {
+  display: block;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* The svg does its own hit-testing (nearest circle), so children never take events */
+.tag-map svg * {
+  pointer-events: none;
+}
+
+.tag-map-edges {
+  transition: opacity 0.2s;
+}
+
+.tag-map-edges line {
+  stroke: var(--reading-muted);
+  transition: opacity 0.2s;
+}
+
+.tag-map-edges line.is-dim {
+  opacity: 0.12;
+}
+
+.tag-map-edges.is-faded {
+  opacity: 0.25;
+}
+
+.tag-map-focus-edges line {
+  stroke: #e5e7eb;
+  stroke-linecap: round;
+}
+
+.tag-map-nodes circle {
+  stroke: #000;
+  stroke-width: 1;
+  transition: opacity 0.2s;
+}
+
+.tag-map-nodes circle.is-dim {
+  opacity: 0.14;
+}
+
+.tag-map-nodes circle.is-hovered {
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.tag-map-nodes circle.is-selected {
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+
+.tag-map-labels text {
+  font-family: 'Roboto Mono', monospace;
+  letter-spacing: 0;
+  text-anchor: middle;
+  fill: var(--reading-ink-2);
+  paint-order: stroke;
+  stroke: #000;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.tag-map-labels text.is-focus {
+  fill: var(--reading-ink);
+  font-weight: 700;
+}
+
+.reading-caption {
+  margin-top: 12px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--reading-faint);
+}
+
+.reading-hint-touch {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .reading-hint-pointer {
+    display: none;
+  }
+
+  .reading-hint-touch {
+    display: inline;
+  }
+}
+
+/* Tooltips (map and timeline) */
+.reading-tooltip {
+  position: absolute;
+  z-index: 10;
+  /* Explicit width, or a box anchored near the right edge shrinks to fit */
+  width: max-content;
+  max-width: 280px;
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  letter-spacing: normal;
+  color: var(--reading-ink-2);
+  background: rgba(10, 10, 10, 0.96);
+  border: 1px solid #262626;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.reading-tooltip-title {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--reading-ink);
+}
+
+.reading-tooltip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 4px;
+  color: var(--reading-muted);
+}
+
+.reading-tooltip-meta strong {
+  font-weight: 500;
+  color: var(--reading-ink);
+}
+
+.reading-tooltip-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reading-tooltip-text {
+  margin-top: 6px;
+  color: var(--reading-ink-2);
+}
+
+/* Timeline */
+.reading-section {
+  margin-top: 56px;
+}
+
+.reading-sub {
+  margin: -2px 0 18px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--reading-faint);
+}
+
+.timeline {
+  position: relative;
+}
+
+.timeline svg {
+  display: block;
+  overflow: visible;
+  touch-action: pan-y;
+  border-radius: 4px;
+}
+
+.timeline svg:focus {
+  outline: none;
+}
+
+.timeline svg:focus-visible {
+  outline: 1px solid var(--reading-ghost);
+  outline-offset: 6px;
+}
+
+.timeline-grid line {
+  stroke: #1a1a1a;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.timeline-grid line.is-baseline {
+  stroke: #374151;
+}
+
+.timeline-grid text {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0;
+  fill: var(--reading-faint);
+  text-anchor: end;
+}
+
+.timeline-grid text.timeline-month {
+  text-anchor: middle;
+}
+
+.timeline-layers path {
+  fill-opacity: 0.9;
+  transition: opacity 0.2s;
+}
+
+.timeline-layers path.is-dim {
+  opacity: 0.14;
+}
+
+.timeline-layers path.timeline-seam {
+  fill: none;
+  stroke: #000;
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+
+.timeline-crosshair {
+  stroke: #e5e7eb;
+  stroke-width: 1;
+  stroke-opacity: 0.7;
+  shape-rendering: crispEdges;
+}
+
+.timeline-tooltip {
+  min-width: 190px;
+}
+
+.timeline-tooltip-rows {
+  list-style: none;
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.timeline-tooltip-rows li {
+  display: grid;
+  grid-template-columns: 12px minmax(2.5ch, auto) 1fr;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.timeline-tooltip-rows li.is-dim {
+  opacity: 0.4;
+}
+
+.timeline-tooltip-rows strong {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--reading-ink);
+}
+
+/* All tags */
+.tag-index {
+  margin-top: 56px;
+  padding-top: 18px;
+  border-top: 1px solid var(--reading-hairline);
+}
+
+.tag-index summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.tag-index summary::-webkit-details-marker {
+  display: none;
+}
+
+.tag-index summary::after {
+  content: '+';
+  margin-left: auto;
+  font-family: 'Roboto Mono', monospace;
+  color: var(--reading-faint);
+}
+
+.tag-index[open] summary::after {
+  content: '\2212';
+}
+
+.tag-index summary .reading-heading {
+  margin-bottom: 0;
+}
+
+.tag-index summary:hover .reading-heading {
+  color: var(--reading-ink-2);
+}
+
+.tag-index-total {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--reading-ghost);
+}
+
+.tag-index-groups {
+  columns: 3 240px;
+  column-gap: 40px;
+  margin-top: 24px;
+}
+
+.tag-index-group {
+  break-inside: avoid;
+  margin-bottom: 28px;
+}
+
+.tag-index-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--reading-ink-2);
+}
+
+.tag-index-group ul {
+  list-style: none;
+}
+
+.tag-index-group button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 3px 0;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  text-align: left;
+  color: var(--reading-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.tag-index-group button span {
+  color: var(--reading-ghost);
+}
+
+.tag-index-group button:hover,
+.tag-index-group button[aria-current='true'] {
+  color: var(--reading-ink);
+}
+
+/* Side panel: a sticky column on wide screens, a drawer on tablets and a
+   bottom sheet on phones */
+.reading-panel {
+  padding: 24px;
+  background: var(--reading-surface);
+  border: 1px solid var(--reading-hairline);
+  border-radius: 12px;
+  outline: none;
+  scrollbar-width: thin;
+  scrollbar-color: #262626 transparent;
+}
+
+@media (min-width: 1100px) {
+  .reading-panel {
+    position: sticky;
+    top: 24px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 1099px) {
+  .reading {
+    padding: 28px 32px 64px;
+  }
+
+  .reading-panel {
+    position: fixed;
+    z-index: 50;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(420px, 92vw);
+    overflow-y: auto;
+    border-width: 0 0 0 1px;
+    border-color: var(--reading-line);
+    border-radius: 0;
+    box-shadow: -24px 0 48px rgba(0, 0, 0, 0.7);
+    transform: translateX(100%);
+    visibility: hidden;
+    transition:
+      transform 0.25s ease,
+      visibility 0s linear 0.25s;
+  }
+
+  .reading-panel.is-open {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.25s ease;
+  }
+}
+
+@media (max-width: 640px) {
+  .reading {
+    padding: 20px 16px 56px;
+  }
+
+  .reading-header {
+    margin-bottom: 20px;
+  }
+
+  .cluster-chip {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+  }
+
+  .reading-panel {
+    top: auto;
+    left: 0;
+    width: auto;
+    max-height: 65vh;
+    padding: 16px 16px calc(28px + env(safe-area-inset-bottom));
+    border-width: 1px 0 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.7);
+    transform: translateY(100%);
+  }
+
+  .tag-index-groups {
+    columns: 1;
+  }
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.panel-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--reading-muted);
+}
+
+.panel-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  color: var(--reading-muted);
+  background: none;
+  border: 1px solid var(--reading-line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    border-color 0.2s;
+}
+
+.panel-close:hover {
+  color: var(--reading-ink);
+  border-color: #374151;
+}
+
+.panel-close path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.panel-title {
+  margin-top: 10px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.panel-count {
+  margin-top: 4px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--reading-muted);
+}
+
+.panel-definition {
+  margin-top: 16px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--reading-ink-2);
+}
+
+.panel-section {
+  margin-top: 28px;
+}
+
+.panel-brief {
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: #e5e7eb;
+}
+
+.panel-docs {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel-docs a {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--reading-ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.panel-docs a:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--reading-faint);
+  text-underline-offset: 3px;
+}
+
+.panel-doc-meta {
+  display: block;
+  margin-top: 3px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--reading-faint);
+}
+
+.panel-intro p {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--reading-muted);
+}
+
+.panel-intro p + p {
+  margin-top: 12px;
+}
+
+@keyframes readingFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes readingPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Everything is laid out before paint; just drop the fades and slides */
+@media (prefers-reduced-motion: reduce) {
+  .reading *,
+  .reading *::before,
+  .reading *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

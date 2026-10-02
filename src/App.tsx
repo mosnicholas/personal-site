@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 
 import StreamingText from './components/StreamingText';
 import Tagline, { TAGLINE } from './components/Tagline';
 import TerminalMode from './components/TerminalMode';
 import TextScrambler from './components/TextScrambler';
 
+// Loaded on demand, so the reading page never adds to the landing bundle
+const ReadingPage = lazy(() => import('./components/reading/ReadingPage'));
+
 const isTerminalUrl = () =>
   new URLSearchParams(window.location.search).get('mode') === 'terminal';
+
+const isReadingUrl = () => /^\/reading\/?$/.test(window.location.pathname);
 
 const Landing = () => {
   const [showNimo, setShowNimo] = useState(false);
@@ -70,6 +75,15 @@ const Landing = () => {
   );
 };
 
-const App = () => (isTerminalUrl() ? <TerminalMode /> : <Landing />);
+const App = () => {
+  if (isReadingUrl()) {
+    return (
+      <Suspense fallback={null}>
+        <ReadingPage />
+      </Suspense>
+    );
+  }
+  return isTerminalUrl() ? <TerminalMode /> : <Landing />;
+};
 
 export default App;
