@@ -162,6 +162,9 @@ npm run format
 - **Reading models**: `SUMMARY_MODEL` in `api/_lib/summarize.ts` (document summaries), `PLAN_MODEL` in `api/_lib/rebalance.ts`, `GLOSSARY_MODEL` / `BRIEF_MODEL` in `api/_lib/glossary.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts` (weekly email)
 - **Chat rate limits**: `perIpLimit` / `overallLimit` in `api/chat.ts`
 
+## Follow-up work
+- `docs/plans/align-document-summaries.md`: evaluate document summaries (faithfulness, coverage, length, usefulness) with calibrated LLM judges, then pick or distill the summarizer. Not started; read it before changing `SUMMARY_MODEL` or the summary prompt
+
 ## Commit Style
 - Descriptive commit messages that explain "why", not just "what"
 - Reference specific files changed
