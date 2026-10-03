@@ -24,32 +24,38 @@ import {
  * - email: Send the email when something changed (default: true)
  */
 
+const PRICE_FIELDS: [keyof Price, string][] = [
+  ['input', 'Input'],
+  ['cacheWrite5m', '5m cache write'],
+  ['cacheWrite1h', '1h cache write'],
+  ['cacheRead', 'Cache read'],
+  ['output', 'Output'],
+];
+
 const priceCells = (price: Price) =>
-  [
-    price.input,
-    price.cacheWrite5m,
-    price.cacheWrite1h,
-    price.cacheRead,
-    price.output,
-  ]
-    .map((value) => `<td style="padding: 2px 10px">$${value}</td>`)
-    .join('');
+  PRICE_FIELDS.map(
+    ([key]) => `<td style="padding: 2px 10px">$${price[key]}</td>`,
+  ).join('');
 
 function reportEmail(report: PriceCheckReport): {
   subject: string;
   html: string;
 } {
-  const rows = [
-    ...report.changed.map(
-      ({ model, before, after }) =>
-        `<tr><td style="padding: 2px 10px">${model} (was)</td>${priceCells(before)}</tr>` +
-        `<tr><td style="padding: 2px 10px"><b>${model} (now)</b></td>${priceCells(after)}</tr>`,
-    ),
-    ...report.added.map(
-      ({ model, price }) =>
-        `<tr><td style="padding: 2px 10px">${model} (new)</td>${priceCells(price)}</tr>`,
-    ),
-  ];
+  const changedRows = report.changed.flatMap(({ model, before, after }) =>
+    PRICE_FIELDS.filter(
+      ([key]) => Math.abs(before[key] - after[key]) >= 1e-9,
+    ).map(([key, label]) => {
+      const percent =
+        before[key] === 0
+          ? 'n/a'
+          : `${after[key] > before[key] ? '+' : ''}${(((after[key] - before[key]) / before[key]) * 100).toFixed(1)}%`;
+      return `<tr><td style="padding: 4px 10px">${escapeHtml(model)}<br>${label}</td><td style="padding: 4px 10px"><b>$${before[key]} &rarr; $${after[key]}</b></td><td style="padding: 4px 10px"><b>${percent}</b></td></tr>`;
+    }),
+  );
+  const addedRows = report.added.map(
+    ({ model, price }) =>
+      `<tr><td style="padding: 2px 10px">${escapeHtml(model)}</td>${priceCells(price)}</tr>`,
+  );
   const notes = [
     report.rejected.length > 0 &&
       `Rows left out: ${report.rejected.map(({ row, reason }) => `${row} (${reason})`).join('; ')}.`,
@@ -59,17 +65,33 @@ function reportEmail(report: PriceCheckReport): {
       `Filled in the cost of ${report.costsFilled} earlier calls that had no price.`,
   ].filter(Boolean);
 
-  const subject =
-    report.changed.length > 0
-      ? `Model prices changed: ${report.changed.map(({ model }) => model).join(', ')}`
-      : `Model prices added for ${report.added.length} model${report.added.length === 1 ? '' : 's'}`;
+  const summary = `${report.added.length} model${report.added.length === 1 ? '' : 's'} added; ${report.changed.length} existing model${report.changed.length === 1 ? "'s prices" : ' prices'} changed`;
+  const subject = `Model price check: ${summary}`;
   const html = `<div style="font-family: sans-serif; font-size: 14px">
-<p>The daily price check found differences on <a href="${PRICING_URL.replace(/\.md$/, '')}">Anthropic's pricing page</a> and recorded them in <code>model_prices</code>, effective today. Calls from today on are priced at the new rates; earlier calls keep theirs.</p>
+<p><b>${summary}.</b></p>
+<p>The daily check compared <a href="${PRICING_URL.replace(/\.md$/, '')}">Anthropic's pricing page</a> with our stored prices. USD per million tokens.</p>
+${
+  changedRows.length > 0
+    ? `<h2 style="font-size: 16px">Price changes</h2>
+<p>Only changed rates are shown; all other rates for these models stayed the same.</p>
+<table style="border-collapse: collapse; font-size: 13px">
+<tr><th align="left" style="padding: 4px 10px">Model / rate</th><th align="left" style="padding: 4px 10px">Previous &rarr; current</th><th align="left" style="padding: 4px 10px">Change</th></tr>
+${changedRows.join('\n')}
+</table>
+<p>Changed rates take effect today. Earlier calls with a recorded cost keep that cost.</p>`
+    : '<p>No existing model prices changed.</p>'
+}
+${
+  addedRows.length > 0
+    ? `<h2 style="font-size: 16px">Newly tracked models</h2>
+<p>These models had no prices stored in our database, so there is no previous price to compare. This does not necessarily mean they are newly released models.</p>
 <table style="border-collapse: collapse; font-size: 13px">
 <tr><th align="left" style="padding: 2px 10px">Model</th><th align="left" style="padding: 2px 10px">Input</th><th align="left" style="padding: 2px 10px">5m cache write</th><th align="left" style="padding: 2px 10px">1h cache write</th><th align="left" style="padding: 2px 10px">Cache read</th><th align="left" style="padding: 2px 10px">Output</th></tr>
-${rows.join('\n')}
-</table>
-<p style="color: #666">USD per million tokens. ${escapeHtml(notes.join(' '))}</p>
+${addedRows.join('\n')}
+</table>`
+    : ''
+}
+${notes.length > 0 ? `<p style="color: #666">${escapeHtml(notes.join(' '))}</p>` : ''}
 </div>`;
   return { subject, html };
 }
