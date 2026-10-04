@@ -9,6 +9,7 @@ import {
 import {
   assertSourceCoverage,
   enrichLike,
+  IMPORT_CHUNK_CHARS,
   redactPhotoTraceRequest,
   setLikesEnrichmentTestDependencies,
   splitNotes,
@@ -23,10 +24,16 @@ function modelResponse(body: unknown): Anthropic.Message {
   } as Anthropic.Message;
 }
 
-function mockClient(body: unknown): Pick<Anthropic, 'messages'> {
+function mockClient(
+  body: unknown,
+  requests?: Anthropic.MessageCreateParamsNonStreaming[],
+): Pick<Anthropic, 'messages'> {
   return {
     messages: {
-      create: async () => modelResponse(body),
+      create: async (request: Anthropic.MessageCreateParamsNonStreaming) => {
+        requests?.push(request);
+        return modelResponse(body);
+      },
     },
   } as unknown as Pick<Anthropic, 'messages'>;
 }
@@ -119,18 +126,22 @@ test('rejects a note-import result that leaves source text uncovered', () => {
 test('imports a URL excerpt as a link while preserving its full rationale', async () => {
   const excerpt =
     'Buy https://example.com/perfume because it smells like cedar.';
+  const requests: Anthropic.MessageCreateParamsNonStreaming[] = [];
   setLikesEnrichmentTestDependencies({
-    client: mockClient({
-      complete: true,
-      items: [
-        {
-          excerpt,
-          title: 'Cedar perfume',
-          category: 'fragrance',
-          tags: ['cedar'],
-        },
-      ],
-    }),
+    client: mockClient(
+      {
+        complete: true,
+        items: [
+          {
+            excerpt,
+            title: 'Cedar perfume',
+            category: 'fragrance',
+            tags: ['cedar'],
+          },
+        ],
+      },
+      requests,
+    ),
   });
   try {
     const inputs = await splitNotes(excerpt, 'import-test');
@@ -146,6 +157,9 @@ test('imports a URL excerpt as a link while preserving its full rationale', asyn
         source: 'import',
       },
     ]);
+    const schema = requests[0]?.output_config?.format as
+      { schema?: { required?: string[] } } | undefined;
+    assert.deepEqual(schema?.schema?.required, ['complete', 'items']);
   } finally {
     setLikesEnrichmentTestDependencies();
   }
@@ -187,14 +201,18 @@ test('photo enrichment keeps product identification suggested and records visibl
       },
     ],
   } satisfies LikedItem;
+  const requests: Anthropic.MessageCreateParamsNonStreaming[] = [];
   setLikesEnrichmentTestDependencies({
-    client: mockClient({
-      category: 'fragrance',
-      tags: ['perfume'],
-      title: 'Acme',
-      extractedText: 'ACME PARFUM',
-      identification: 'confirmed',
-    }),
+    client: mockClient(
+      {
+        category: 'fragrance',
+        tags: ['perfume'],
+        title: 'Acme',
+        extractedText: 'ACME PARFUM',
+        identification: 'confirmed',
+      },
+      requests,
+    ),
     readAttachment: async () => ({
       attachment: item.attachments[0]!,
       data: new Uint8Array([1, 2, 3]),
@@ -205,9 +223,37 @@ test('photo enrichment keeps product identification suggested and records visibl
     assert.equal(patch.identification, 'suggested');
     assert.equal(patch.extractedText, 'ACME PARFUM');
     assert.equal(patch.category, 'fragrance');
+    const schema = requests[0]?.output_config?.format as
+      { schema?: { required?: string[] } } | undefined;
+    assert.ok(schema?.schema?.required?.includes('tags'));
   } finally {
     setLikesEnrichmentTestDependencies();
   }
+});
+
+test('rejects incomplete model responses and oversized import segments', async () => {
+  for (const stopReason of ['refusal', 'max_tokens'] as const) {
+    setLikesEnrichmentTestDependencies({
+      client: {
+        messages: {
+          create: async () =>
+            ({
+              content: [],
+              stop_reason: stopReason,
+            }) as unknown as Anthropic.Message,
+        },
+      } as unknown as Pick<Anthropic, 'messages'>,
+    });
+    await assert.rejects(
+      () => splitNotes('one saved note', `rejected-${stopReason}`),
+      /did not finish/,
+    );
+  }
+  setLikesEnrichmentTestDependencies();
+  await assert.rejects(
+    () => splitNotes('a'.repeat(IMPORT_CHUNK_CHARS + 1), 'too-large'),
+    /safety limit/,
+  );
 });
 
 test('photo trace records private attachment provenance instead of base64 bytes', () => {

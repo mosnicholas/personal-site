@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { waitUntil } from '@vercel/functions';
 import type { LikeInput, LikedItem } from '../../shared/likes.js';
-import { enrichLike, splitNotes } from './likes-enrichment.js';
+import {
+  enrichLike,
+  IMPORT_CHUNK_CHARS,
+  splitNotes,
+} from './likes-enrichment.js';
 import {
   getLike,
   getLikesSql,
@@ -16,6 +20,25 @@ const safeError = (error: unknown) =>
   error instanceof LikesError
     ? error.message
     : 'Could not finish processing. Your original is saved; retry to try again.';
+
+function nextImportSegment(remaining: string): string {
+  let boundary = Math.min(IMPORT_CHUNK_CHARS, remaining.length);
+  if (remaining.length > boundary) {
+    const paragraph = remaining.lastIndexOf('\n\n', boundary);
+    const line = remaining.lastIndexOf('\n', boundary);
+    const space = remaining.lastIndexOf(' ', boundary);
+    boundary =
+      paragraph > IMPORT_CHUNK_CHARS / 2
+        ? paragraph
+        : line > IMPORT_CHUNK_CHARS / 2
+          ? line
+          : space > 0
+            ? space
+            : boundary;
+  }
+  return remaining.slice(0, boundary);
+}
+
 export async function retryImport(id: string) {
   const sql = await getLikesSql();
   const rows =
@@ -47,32 +70,20 @@ export async function processLikes({
           const original = String(batch.original_text);
           const parseCursor = Number(batch.parse_cursor);
           const remaining = original.slice(parseCursor);
-          let boundary = Math.min(6000, remaining.length);
-          if (remaining.length > boundary) {
-            const paragraph = remaining.lastIndexOf('\n\n', boundary);
-            const line = remaining.lastIndexOf('\n', boundary);
-            const space = remaining.lastIndexOf(' ', boundary);
-            boundary =
-              paragraph > 3000
-                ? paragraph
-                : line > 3000
-                  ? line
-                  : space > 0
-                    ? space
-                    : boundary;
-          }
-          const part = remaining.slice(0, boundary);
-          const extracted = await splitNotes(
-            part,
-            `${batch.id}:${parseCursor}`,
-          );
-          if (!extracted.length)
-            throw new LikesError(
-              'No individual items could be extracted. Your pasted text is saved.',
-            );
-          parsed = [...parsed, ...extracted];
+          const part = nextImportSegment(remaining);
           const nextCursor = parseCursor + part.length;
           const complete = nextCursor >= original.length;
+          if (part.trim()) {
+            const extracted = await splitNotes(
+              part,
+              `${batch.id}:${parseCursor}`,
+            );
+            if (!extracted.length)
+              throw new LikesError(
+                'No individual items could be extracted. Your pasted text is saved.',
+              );
+            parsed = [...parsed, ...extracted];
+          }
           const written =
             await sql`UPDATE likes_imports SET parsed_items=${JSON.stringify(parsed)}::jsonb,parse_cursor=${nextCursor},parse_complete=${complete} WHERE id=${batch.id} AND lease_id=${lease} RETURNING id`;
           if (!written.length) continue;

@@ -94,7 +94,7 @@ export function getLikesSql(): Promise<Sql> {
   return ready;
 }
 
-const inputSchema = z
+export const likeInputSchema = z
   .object({
     kind: z.enum(['link', 'note', 'photo']).optional(),
     url: z.string().max(4096).optional(),
@@ -108,7 +108,7 @@ const inputSchema = z
   })
   .strict();
 export function normalizeLike(input: LikeInput) {
-  const parsed = inputSchema.safeParse(input);
+  const parsed = likeInputSchema.safeParse(input);
   if (!parsed.success)
     throw new LikesError(
       'Invalid item: ' +
@@ -322,8 +322,6 @@ export async function saveLike(
         : `note:${data.text}`,
   );
   const id = randomUUID();
-  const [old] =
-    await sql`SELECT id FROM liked_items WHERE fingerprint=${fingerprint}`;
   const title =
     data.title?.trim() ||
     (data.kind === 'link'
@@ -409,10 +407,7 @@ export async function saveLike(
     );
   return {
     item: (await getLike(String(result[0].item_id)))!,
-    duplicate:
-      Boolean(old) ||
-      Boolean(result[0].duplicate) ||
-      Boolean(result[0].replayed),
+    duplicate: Boolean(result[0].duplicate) || Boolean(result[0].replayed),
     ...(result[0].replayed
       ? { replayed: true, originallyDuplicate: Boolean(result[0].duplicate) }
       : {}),

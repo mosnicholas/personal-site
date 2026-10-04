@@ -8,6 +8,7 @@ import {
 
 import { ownerCookie, sameOrigin } from './likes-auth.js';
 import { secretsMatch } from './auth.js';
+import { readBoundedText } from './likes-request.js';
 import { getLikesSql } from './likes-store.js';
 import {
   likesOrigin as origin,
@@ -20,23 +21,7 @@ const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const CSRF_COOKIE = 'likes_oauth_csrf';
 const MAX_REDIRECT_URIS = 5;
-async function readBounded(request: Request, maxBytes = 16384) {
-  const reader = request.body?.getReader();
-  if (!reader) return '';
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.length;
-    if (size > maxBytes) {
-      await reader.cancel();
-      throw new Error('OAuth request too large');
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
+const OAUTH_BODY_LIMIT = 16384;
 
 type OAuthClient = {
   client_id: string;
@@ -380,7 +365,7 @@ async function handleRegistration(request: Request): Promise<Response> {
     return oauthError('invalid_request', 'POST required', 405);
   let payload: unknown;
   try {
-    payload = JSON.parse(await readBounded(request));
+    payload = JSON.parse(await readBoundedText(request, OAUTH_BODY_LIMIT));
   } catch {
     return oauthError('invalid_request', 'body must be JSON');
   }
@@ -467,7 +452,9 @@ async function ownerAuthorizedRequest(
 async function handleAuthorizePost(request: Request): Promise<Response> {
   let form: URLSearchParams;
   try {
-    form = new URLSearchParams(await readBounded(request));
+    form = new URLSearchParams(
+      await readBoundedText(request, OAUTH_BODY_LIMIT),
+    );
   } catch {
     return noStoreHtml('<h1>Authorization failed</h1>', 400);
   }
@@ -636,7 +623,9 @@ async function handleToken(request: Request): Promise<Response> {
     return oauthError('invalid_request', 'form body required');
   let form: URLSearchParams;
   try {
-    form = new URLSearchParams(await readBounded(request));
+    form = new URLSearchParams(
+      await readBoundedText(request, OAUTH_BODY_LIMIT),
+    );
   } catch {
     return oauthError('invalid_request', 'Request too large');
   }

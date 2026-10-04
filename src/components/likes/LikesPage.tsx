@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
   ImportBatch,
@@ -31,6 +31,14 @@ interface ProcessStats {
   imported: number;
   pending: number;
 }
+
+interface LikeSelection {
+  id: string;
+  item: LikedItem;
+}
+
+type DetailField = 'title' | 'note' | 'category' | 'tags';
+type DetailDraft = Partial<Record<DetailField, string>>;
 
 const pendingStatuses = new Set(['pending', 'processing']);
 const PAGE_SIZE = 50;
@@ -103,8 +111,7 @@ const LikesPage = () => {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
   const [offset, setOffset] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [remoteSelected, setRemoteSelected] = useState<LikedItem | null>(null);
+  const [selection, setSelection] = useState<LikeSelection | null>(null);
   const [loginKey, setLoginKey] = useState('');
   const [loginError, setLoginError] = useState('');
   const [capture, setCapture] = useState<CaptureDraft>(captureFromQuery);
@@ -118,9 +125,13 @@ const LikesPage = () => {
   const [processError, setProcessError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [notice, setNotice] = useState('');
+  const [reloadCycle, setReloadCycle] = useState(0);
   const [processCycle, setProcessCycle] = useState(0);
   const [reportedPending, setReportedPending] = useState(0);
-  const currentRequest = useRef<AbortController | null>(null);
+  const readGeneration = useRef(0);
+  const currentRead = useRef<AbortController | null>(null);
+  const importStatusRead = useRef<AbortController | null>(null);
+  const detailRead = useRef<AbortController | null>(null);
   const processStarted = useRef(false);
   const processTimer = useRef<number | null>(null);
   const requestedItemId = useRef(
@@ -130,15 +141,23 @@ const LikesPage = () => {
   const captureRequestKey = useRef<string | null>(null);
   const uploadedAttachmentIds = useRef<string[]>([]);
 
-  const selected =
-    (remoteSelected?.id === selectedId && remoteSelected) ||
-    items.find((item) => item.id === selectedId) ||
-    null;
+  const selected = selection?.item ?? null;
   const hasPending = items.some(isPending);
   const hasPendingImport = Boolean(
     importBatch && pendingStatuses.has(importBatch.status),
   );
-  const hasWork = hasPending || hasPendingImport || reportedPending > 0;
+  const selectedPendingOffPage = Boolean(
+    selection &&
+    isPending(selection.item) &&
+    !items.some((item) => item.id === selection.id),
+  );
+  const hasWork =
+    hasPending ||
+    hasPendingImport ||
+    reportedPending > 0 ||
+    selectedPendingOffPage;
+  const selectionId = selection?.id;
+  const detailReloadCycle = selection ? reloadCycle : 0;
   const changeCapture = (patch: Partial<typeof capture>) => {
     // A changed draft is a new capture; do not reuse a prior retry token or upload.
     captureRequestKey.current = null;
@@ -146,58 +165,86 @@ const LikesPage = () => {
     setCapture((current) => ({ ...current, ...patch }));
   };
 
-  const load = useCallback(
-    async (signal?: AbortSignal) => {
-      const search = new URLSearchParams();
-      if (query.trim()) search.set('q', query.trim());
-      if (category) search.set('category', category);
-      search.set('limit', String(PAGE_SIZE));
-      search.set('offset', String(offset));
-      const suffix = search.size ? `?${search}` : '';
-      const response = await fetch(`/api/likes${suffix}`, { signal });
-      if (response.status === 401) {
-        setLoadState('signed-out');
-        return;
-      }
-      if (!response.ok) throw new Error(await apiError(response));
-      const data = (await response.json()) as LikesResponse;
-      setItems(data.items);
-      setTotal(data.total);
-      setCategories(data.categories);
-      setSettings(data.settings);
-      setLoadState('ready');
-    },
-    [category, offset, query],
-  );
+  const invalidateCollectionReads = useCallback(() => {
+    readGeneration.current += 1;
+    currentRead.current?.abort();
+    currentRead.current = null;
+  }, []);
+
+  const abortAuxiliaryReads = useCallback(() => {
+    importStatusRead.current?.abort();
+    importStatusRead.current = null;
+    detailRead.current?.abort();
+    detailRead.current = null;
+  }, []);
+
+  const canReadCollection = loadState !== 'signed-out';
+  const refresh = useCallback(() => {
+    setReloadCycle((current) => current + 1);
+  }, []);
 
   useEffect(() => {
+    if (!canReadCollection) return;
+    const search = new URLSearchParams();
+    if (query.trim()) search.set('q', query.trim());
+    if (category) search.set('category', category);
+    search.set('limit', String(PAGE_SIZE));
+    search.set('offset', String(offset));
+
+    const generation = readGeneration.current + 1;
+    readGeneration.current = generation;
+    currentRead.current?.abort();
     const controller = new AbortController();
-    currentRequest.current?.abort();
-    currentRequest.current = controller;
-    const task = window.setTimeout(() => {
-      load(controller.signal).catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+    currentRead.current = controller;
+    const isCurrent = () =>
+      !controller.signal.aborted &&
+      readGeneration.current === generation &&
+      currentRead.current === controller;
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/likes?${search}`, {
+          signal: controller.signal,
+        });
+        if (!isCurrent()) return;
+        if (response.status === 401) {
+          invalidateCollectionReads();
+          abortAuxiliaryReads();
+          setLoadState('signed-out');
+          return;
+        }
+        if (!response.ok) throw new Error(await apiError(response));
+        const data = (await response.json()) as LikesResponse;
+        if (!isCurrent()) return;
+        setItems(data.items);
+        setSelection((current) => {
+          const id = current?.id ?? requestedItemId.current;
+          const fresh = id && data.items.find((item) => item.id === id);
+          return fresh ? { id: fresh.id, item: fresh } : current;
+        });
+        setTotal(data.total);
+        setCategories(data.categories);
+        setSettings(data.settings);
+        setLoadState('ready');
+      } catch (error) {
+        if (!isCurrent() || controller.signal.aborted) return;
         setLoadState('error');
         setNotice(
           error instanceof Error ? error.message : 'Could not load likes.',
         );
-      });
-    }, 0);
-    return () => {
-      window.clearTimeout(task);
-      controller.abort();
-    };
-  }, [load]);
+      }
+    })();
 
-  const refresh = useCallback(async () => {
-    try {
-      await load();
-    } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : 'Could not refresh likes.',
-      );
-    }
-  }, [load]);
+    return () => controller.abort();
+  }, [
+    abortAuxiliaryReads,
+    canReadCollection,
+    category,
+    invalidateCollectionReads,
+    offset,
+    query,
+    reloadCycle,
+  ]);
 
   const scheduleProcess = useCallback((delay: number) => {
     if (processTimer.current !== null) {
@@ -215,8 +262,9 @@ const LikesPage = () => {
       if (processTimer.current !== null) {
         window.clearTimeout(processTimer.current);
       }
+      abortAuxiliaryReads();
     },
-    [],
+    [abortAuxiliaryReads],
   );
 
   const processPending = useCallback(async () => {
@@ -227,6 +275,8 @@ const LikesPage = () => {
     try {
       const response = await fetch('/api/likes?op=process', { method: 'POST' });
       if (response.status === 401) {
+        invalidateCollectionReads();
+        abortAuxiliaryReads();
         setLoadState('signed-out');
         return;
       }
@@ -234,10 +284,12 @@ const LikesPage = () => {
       const stats = (await response.json()) as ProcessStats;
       setReportedPending(stats.pending);
       void refresh();
-      if (stats.pending > 0 && (stats.processed > 0 || stats.imported > 0)) {
-        scheduleProcess(PROCESS_NEXT_DELAY_MS);
-      } else if (stats.pending > 0 && stats.failed > 0) {
-        scheduleProcess(PROCESS_BACKOFF_DELAY_MS);
+      if (stats.pending > 0) {
+        scheduleProcess(
+          stats.processed > 0 || stats.imported > 0
+            ? PROCESS_NEXT_DELAY_MS
+            : PROCESS_BACKOFF_DELAY_MS,
+        );
       }
     } catch (error) {
       setProcessError(
@@ -247,7 +299,14 @@ const LikesPage = () => {
     } finally {
       setIsProcessing(false);
     }
-  }, [hasWork, isProcessing, refresh, scheduleProcess]);
+  }, [
+    abortAuxiliaryReads,
+    hasWork,
+    invalidateCollectionReads,
+    isProcessing,
+    refresh,
+    scheduleProcess,
+  ]);
 
   useEffect(() => {
     if (loadState !== 'ready' || !hasWork) return;
@@ -262,30 +321,69 @@ const LikesPage = () => {
   }, [hasWork, loadState, refresh]);
 
   useEffect(() => {
-    if (!importBatch || !pendingStatuses.has(importBatch.status)) return;
+    if (
+      loadState !== 'ready' ||
+      !importBatch ||
+      !pendingStatuses.has(importBatch.status)
+    ) {
+      return;
+    }
     const timer = window.setInterval(() => {
-      fetch(`/api/likes?op=import&id=${encodeURIComponent(importBatch.id)}`)
-        .then(async (response) => {
+      void (async () => {
+        importStatusRead.current?.abort();
+        const controller = new AbortController();
+        importStatusRead.current = controller;
+        try {
+          const response = await fetch(
+            `/api/likes?op=import&id=${encodeURIComponent(importBatch.id)}`,
+            { signal: controller.signal },
+          );
+          if (
+            controller.signal.aborted ||
+            importStatusRead.current !== controller
+          ) {
+            return;
+          }
           if (response.status === 401) {
+            invalidateCollectionReads();
+            abortAuxiliaryReads();
             setLoadState('signed-out');
-            return null;
+            return;
           }
           if (!response.ok) throw new Error(await apiError(response));
-          return (await response.json()) as ImportBatch;
-        })
-        .then((batch) => {
-          if (!batch) return;
+          const batch = (await response.json()) as ImportBatch;
+          if (
+            controller.signal.aborted ||
+            importStatusRead.current !== controller
+          ) {
+            return;
+          }
           setImportBatch(batch);
           if (!pendingStatuses.has(batch.status)) void refresh();
-        })
-        .catch((error: unknown) =>
+        } catch (error) {
+          if (
+            controller.signal.aborted ||
+            importStatusRead.current !== controller
+          ) {
+            return;
+          }
           setImportError(
             error instanceof Error ? error.message : 'Could not check import.',
-          ),
-        );
+          );
+        }
+      })();
     }, 2_000);
-    return () => window.clearInterval(timer);
-  }, [importBatch, refresh]);
+    return () => {
+      window.clearInterval(timer);
+      importStatusRead.current?.abort();
+    };
+  }, [
+    abortAuxiliaryReads,
+    importBatch,
+    invalidateCollectionReads,
+    loadState,
+    refresh,
+  ]);
 
   useEffect(() => {
     if (!hasWork) processStarted.current = false;
@@ -296,47 +394,74 @@ const LikesPage = () => {
   }, []);
 
   useEffect(() => {
-    const id = requestedItemId.current;
-    if (!id || loadState !== 'ready') return;
-    requestedItemId.current = null;
-    const inPage = items.find((item) => item.id === id);
-    if (inPage) {
-      setRemoteSelected(null);
-      setSelectedId(inPage.id);
+    const requestedId = requestedItemId.current;
+    if (requestedId && selectionId === requestedId) {
+      requestedItemId.current = null;
+      detailRead.current?.abort();
       return;
     }
-    const controller = new AbortController();
+    const id = requestedId ?? (selectedPendingOffPage ? selectionId : null);
+    if (!id || loadState !== 'ready') return;
     const task = window.setTimeout(() => {
-      fetch(`/api/likes?id=${encodeURIComponent(id)}`, {
-        signal: controller.signal,
-      })
-        .then(async (response) => {
+      void (async () => {
+        detailRead.current?.abort();
+        const controller = new AbortController();
+        detailRead.current = controller;
+        try {
+          const response = await fetch(
+            `/api/likes?id=${encodeURIComponent(id)}`,
+            { signal: controller.signal },
+          );
+          if (controller.signal.aborted || detailRead.current !== controller) {
+            return;
+          }
           if (response.status === 401) {
+            if (requestedId === id) requestedItemId.current = null;
+            invalidateCollectionReads();
+            abortAuxiliaryReads();
             setLoadState('signed-out');
-            return null;
+            return;
           }
           if (!response.ok) throw new Error(await apiError(response));
-          return (await response.json()) as { item: LikedItem };
-        })
-        .then((data) => {
-          if (!data) return;
-          setRemoteSelected(data.item);
-          setSelectedId(data.item.id);
-        })
-        .catch((error: unknown) => {
-          if (controller.signal.aborted) return;
+          const data = (await response.json()) as { item: LikedItem };
+          if (controller.signal.aborted || detailRead.current !== controller) {
+            return;
+          }
+          if (requestedId === id) {
+            requestedItemId.current = null;
+            setSelection((current) =>
+              current?.id === id ? current : { id, item: data.item },
+            );
+          } else {
+            setSelection((current) =>
+              current?.id === id ? { id, item: data.item } : current,
+            );
+          }
+        } catch (error) {
+          if (controller.signal.aborted || detailRead.current !== controller) {
+            return;
+          }
+          if (requestedId === id) requestedItemId.current = null;
           setNotice(
             error instanceof Error
               ? error.message
               : 'Could not open this item.',
           );
-        });
+        }
+      })();
     }, 0);
     return () => {
       window.clearTimeout(task);
-      controller.abort();
+      detailRead.current?.abort();
     };
-  }, [items, loadState]);
+  }, [
+    abortAuxiliaryReads,
+    detailReloadCycle,
+    invalidateCollectionReads,
+    loadState,
+    selectedPendingOffPage,
+    selectionId,
+  ]);
 
   useEffect(() => {
     const search = new URLSearchParams(window.location.search);
@@ -353,8 +478,6 @@ const LikesPage = () => {
     );
   }, []);
 
-  const filteredItems = useMemo(() => items, [items]);
-
   const login = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!loginKey || isSaving) return;
@@ -369,7 +492,8 @@ const LikesPage = () => {
       if (!response.ok) throw new Error(await apiError(response));
       setLoginKey('');
       processStarted.current = false;
-      await refresh();
+      setLoadState('loading');
+      refresh();
     } catch (error) {
       setLoginError(
         error instanceof Error ? error.message : 'Could not sign in.',
@@ -394,6 +518,8 @@ const LikesPage = () => {
         body,
       });
       if (response.status === 401) {
+        invalidateCollectionReads();
+        abortAuxiliaryReads();
         setLoadState('signed-out');
         throw new Error('Please sign in again.');
       }
@@ -442,6 +568,8 @@ const LikesPage = () => {
         }),
       });
       if (response.status === 401) {
+        invalidateCollectionReads();
+        abortAuxiliaryReads();
         setLoadState('signed-out');
         return;
       }
@@ -454,7 +582,7 @@ const LikesPage = () => {
       processStarted.current = false;
       setReportedPending(1);
       setProcessCycle((current) => current + 1);
-      await refresh();
+      refresh();
     } catch (error) {
       setCaptureError(
         error instanceof Error ? error.message : 'Could not save this yet.',
@@ -480,6 +608,8 @@ const LikesPage = () => {
         }),
       });
       if (response.status === 401) {
+        invalidateCollectionReads();
+        abortAuxiliaryReads();
         setLoadState('signed-out');
         return;
       }
@@ -517,24 +647,17 @@ const LikesPage = () => {
       },
     );
     if (response.status === 401) {
+      invalidateCollectionReads();
+      abortAuxiliaryReads();
       setLoadState('signed-out');
       return;
     }
     if (!response.ok) throw new Error(await apiError(response));
     const data = (await response.json()) as { item: LikedItem };
-    setItems((current) =>
-      current.map((candidate) =>
-        candidate.id === item.id ? data.item : candidate,
-      ),
+    setSelection((current) =>
+      current?.id === item.id ? { id: data.item.id, item: data.item } : current,
     );
-    setRemoteSelected((current) =>
-      current?.id === item.id ? data.item : current,
-    );
-    setCategories((current) =>
-      [...new Set([...current, data.item.category].filter(Boolean))].sort(
-        (a, b) => a.localeCompare(b),
-      ),
-    );
+    refresh();
   };
 
   const retryItem = async (item: LikedItem) => {
@@ -545,6 +668,8 @@ const LikesPage = () => {
       },
     );
     if (response.status === 401) {
+      invalidateCollectionReads();
+      abortAuxiliaryReads();
       setLoadState('signed-out');
       return;
     }
@@ -552,7 +677,7 @@ const LikesPage = () => {
     processStarted.current = false;
     setReportedPending(1);
     setProcessCycle((current) => current + 1);
-    await refresh();
+    refresh();
   };
 
   const retryImport = async () => {
@@ -565,6 +690,8 @@ const LikesPage = () => {
         { method: 'POST' },
       );
       if (response.status === 401) {
+        invalidateCollectionReads();
+        abortAuxiliaryReads();
         setLoadState('signed-out');
         return;
       }
@@ -573,7 +700,7 @@ const LikesPage = () => {
       processStarted.current = false;
       setReportedPending(1);
       setProcessCycle((current) => current + 1);
-      await refresh();
+      refresh();
     } finally {
       setIsImporting(false);
     }
@@ -588,12 +715,15 @@ const LikesPage = () => {
         body: JSON.stringify(next),
       });
       if (response.status === 401) {
+        invalidateCollectionReads();
+        abortAuxiliaryReads();
         setLoadState('signed-out');
         return;
       }
       if (!response.ok) throw new Error(await apiError(response));
       const data = (await response.json()) as { settings: LikesSettings };
       setSettings(data.settings);
+      refresh();
     } catch (error) {
       setNotice(
         error instanceof Error ? error.message : 'Could not save settings.',
@@ -606,9 +736,11 @@ const LikesPage = () => {
     await fetch('/api/likes?op=logout', { method: 'POST' }).catch(
       () => undefined,
     );
-    currentRequest.current?.abort();
+    invalidateCollectionReads();
+    abortAuxiliaryReads();
     setItems([]);
-    setSelectedId(null);
+    setTotal(0);
+    setSelection(null);
     setLoadState('signed-out');
   };
 
@@ -824,17 +956,18 @@ const LikesPage = () => {
           {processError && <p className="likes-error">{processError}</p>}
           {notice && !processError && <p className="likes-notice">{notice}</p>}
 
-          {filteredItems.length ? (
+          {items.length ? (
             <section className="likes-grid" aria-label="Your likes">
-              {filteredItems.map((item) => {
+              {items.map((item) => {
                 const image = primaryImage(item);
                 return (
                   <button
                     className="likes-card"
                     key={item.id}
                     onClick={() => {
-                      setRemoteSelected(null);
-                      setSelectedId(item.id);
+                      requestedItemId.current = null;
+                      detailRead.current?.abort();
+                      setSelection({ id: item.id, item });
                     }}
                     type="button"
                   >
@@ -937,11 +1070,10 @@ const LikesPage = () => {
 
       {selected && (
         <LikeDetail
-          key={`${selected.id}:${selected.updatedAt}`}
+          key={selected.id}
           item={selected}
           onClose={() => {
-            setRemoteSelected(null);
-            setSelectedId(null);
+            setSelection(null);
           }}
           onPatch={patchItem}
           onRetry={retryItem}
@@ -970,18 +1102,39 @@ const LikeDetail = ({
   ) => Promise<void>;
   onRetry: (item: LikedItem) => Promise<void>;
 }) => {
-  const [title, setTitle] = useState(item.title);
-  const [note, setNote] = useState(item.note);
-  const [category, setCategory] = useState(item.category);
-  const [tags, setTags] = useState(item.tags.join(', '));
+  const [draft, setDraft] = useState<DetailDraft>({});
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const title = draft.title ?? item.title;
+  const note = draft.note ?? item.note;
+  const category = draft.category ?? item.category;
+  const tags = draft.tags ?? item.tags.join(', ');
+  const dirtyFields = Object.keys(draft) as DetailField[];
+  const updateDraft = (field: DetailField, value: string) =>
+    setDraft((current) => ({ ...current, [field]: value }));
+
   const save = async () => {
+    if (!dirtyFields.length) return;
     setSaving(true);
     setError('');
+    const submitted = { ...draft };
+    const patch: Partial<
+      Pick<LikedItem, 'title' | 'note' | 'category' | 'tags'>
+    > = {};
+    if (submitted.title !== undefined) patch.title = submitted.title;
+    if (submitted.note !== undefined) patch.note = submitted.note;
+    if (submitted.category !== undefined) patch.category = submitted.category;
+    if (submitted.tags !== undefined) patch.tags = splitTags(submitted.tags);
     try {
-      await onPatch(item, { title, note, category, tags: splitTags(tags) });
+      await onPatch(item, patch);
+      setDraft((current) => {
+        const next = { ...current };
+        dirtyFields.forEach((field) => {
+          if (current[field] === submitted[field]) delete next[field];
+        });
+        return next;
+      });
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : 'Could not save changes.',
@@ -1042,14 +1195,14 @@ const LikeDetail = ({
         <label>
           Title
           <input
-            onChange={(event) => setTitle(event.target.value)}
+            onChange={(event) => updateDraft('title', event.target.value)}
             value={title}
           />
         </label>
         <label>
           Why
           <textarea
-            onChange={(event) => setNote(event.target.value)}
+            onChange={(event) => updateDraft('note', event.target.value)}
             rows={4}
             value={note}
           />
@@ -1057,14 +1210,14 @@ const LikeDetail = ({
         <label>
           Category
           <input
-            onChange={(event) => setCategory(event.target.value)}
+            onChange={(event) => updateDraft('category', event.target.value)}
             value={category}
           />
         </label>
         <label>
           Tags
           <input
-            onChange={(event) => setTags(event.target.value)}
+            onChange={(event) => updateDraft('tags', event.target.value)}
             value={tags}
           />
         </label>
@@ -1088,7 +1241,11 @@ const LikeDetail = ({
         )}
         {error && <p className="likes-error">{error}</p>}
         <div className="likes-detail-actions">
-          <button disabled={saving} onClick={() => void save()} type="button">
+          <button
+            disabled={saving || !dirtyFields.length}
+            onClick={() => void save()}
+            type="button"
+          >
             {saving ? 'Saving…' : 'Save changes'}
           </button>
           {item.status === 'failed' && (

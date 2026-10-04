@@ -13,6 +13,7 @@ import {
   getLike,
   LikesError,
   listLikes,
+  likeInputSchema,
   saveLike,
   savePhotoLike,
   startImport,
@@ -20,17 +21,6 @@ import {
 
 const MAX_BATCH = 100;
 const MAX_BASE64_BYTES = 2_800_000;
-const likeInputSchema = z.object({
-  kind: z.enum(['link', 'note', 'photo']).optional(),
-  url: z.string().max(4096).optional(),
-  text: z.string().max(30_000).optional(),
-  title: z.string().max(500).optional(),
-  note: z.string().max(10_000).optional(),
-  category: z.string().max(80).optional(),
-  tags: z.array(z.string().max(80)).max(20).optional(),
-  attachmentIds: z.array(z.string().uuid()).max(10).optional(),
-  source: z.string().max(80).optional(),
-});
 function result(value: unknown) {
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(value) }],

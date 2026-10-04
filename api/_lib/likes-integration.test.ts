@@ -15,6 +15,7 @@ import {
 import { exportLikes } from './likes-export.js';
 import { sendLikesDigest } from './likes-digest.js';
 import { archiveLike } from './likes-archive.js';
+import { IMPORT_CHUNK_CHARS } from './likes-enrichment.js';
 import { processLikes, drainLikes } from './likes-jobs.js';
 import {
   getImport,
@@ -406,6 +407,26 @@ test('long backfills checkpoint parsing between bounded runs', async () => {
   assert.equal(Number(finished.parse_cursor), text.length);
   assert.equal(finished.parse_complete, true);
   assert.ok((finished.parsed_items as unknown[]).length > 1);
+});
+
+test('trailing whitespace advances the import checkpoint without a second parse', async () => {
+  const text = `${'x'.repeat(IMPORT_CHUNK_CHARS)} \n\t `;
+  const batch = await startImport(text, 'whitespace-tail-import');
+  await processLikes({ limit: 1 });
+  const sql = await getLikesSql();
+  const [first] =
+    await sql`SELECT parse_cursor,parse_complete,parsed_items FROM likes_imports WHERE id=${batch.id}`;
+  assert.equal(Number(first.parse_cursor), IMPORT_CHUNK_CHARS);
+  assert.equal(first.parse_complete, false);
+  assert.equal((first.parsed_items as unknown[]).length, 1);
+  const result = await processLikes({ limit: 1 });
+  assert.equal(result.failed, 0);
+  const [finished] =
+    await sql`SELECT parse_cursor,parse_complete,parsed_items,status FROM likes_imports WHERE id=${batch.id}`;
+  assert.equal(Number(finished.parse_cursor), text.length);
+  assert.equal(finished.parse_complete, true);
+  assert.equal(finished.status, 'ready');
+  assert.equal((finished.parsed_items as unknown[]).length, 1);
 });
 
 test('background processing continues across batches without an MCP processing tool', async () => {

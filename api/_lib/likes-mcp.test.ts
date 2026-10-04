@@ -52,6 +52,30 @@ test('MCP tools are private and are discoverable by an SDK client after authoriz
     'save_likes',
     'search_likes',
   ]);
+  for (const input of [
+    { text: 'Invalid category', category: '   ' },
+    { text: 'Invalid tags', tags: ['   '] },
+    { text: 'Unexpected input', unexpected: true },
+  ]) {
+    const invalid = await client.callTool({
+      name: 'save_like',
+      arguments: { input },
+    });
+    assert.equal(invalid.isError, true);
+  }
+  const valid = await client.callTool({
+    name: 'save_like',
+    arguments: {
+      input: {
+        text: 'Trimmed capture',
+        category: ' fragrance ',
+        tags: [' woody '],
+      },
+    },
+  });
+  assert.ok(!valid.isError);
+  assert.match(JSON.stringify(valid), /"category":"fragrance"/);
+  assert.match(JSON.stringify(valid), /"tags":\["woody"\]/);
   const photo = {
     input: { note: 'a small black ceramic mug' },
     photo_base64: (

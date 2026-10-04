@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 
 import type {
@@ -13,7 +14,7 @@ import { tracedCall } from './traces.js';
 
 const ENRICHMENT_MODEL = 'claude-haiku-4-5';
 const IMPORT_MODEL = 'claude-haiku-4-5';
-const IMPORT_CHUNK_CHARS = 6_000;
+export const IMPORT_CHUNK_CHARS = 6_000;
 const MAX_VISION_BYTES = 5 * 1024 * 1024;
 
 type LikesAiClient = Pick<Anthropic, 'messages'>;
@@ -77,13 +78,6 @@ const outputText = (response: Anthropic.Message) => {
   return text;
 };
 
-function jsonRequest(schema: Record<string, unknown>) {
-  return {
-    type: 'json_schema' as const,
-    schema,
-  };
-}
-
 function makeEnrichmentRequest(
   subject: Record<string, unknown>,
 ): Anthropic.MessageCreateParamsNonStreaming {
@@ -94,28 +88,23 @@ function makeEnrichmentRequest(
       'Classify a private personal save. Preserve the user wording: make suggestions only, do not invent facts, and use identification "suggested" unless the supplied evidence itself confirms it. Return JSON only.',
     messages: [{ role: 'user', content: JSON.stringify(subject) }],
     output_config: {
-      format: jsonRequest({
-        type: 'object',
-        properties: {
-          category: { type: 'string' },
-          tags: { type: 'array', items: { type: 'string' } },
-          title: { type: 'string' },
-          description: { type: 'string' },
-          brand: { type: 'string' },
-          extractedText: { type: 'string' },
-          identification: { enum: ['confirmed', 'suggested', 'unknown'] },
-        },
-        required: ['tags', 'identification'],
-        additionalProperties: false,
-      }),
+      format: zodOutputFormat(enrichmentSchema),
     },
   };
 }
 
-async function classify(subjectId: string, subject: Record<string, unknown>) {
-  const request = makeEnrichmentRequest(subject);
+async function runEnrichment(
+  subjectId: string,
+  request: Anthropic.MessageCreateParamsNonStreaming,
+  traceRequest: unknown = request,
+) {
   return tracedCall(
-    { kind: 'likes_enrichment', subjectId, model: ENRICHMENT_MODEL, request },
+    {
+      kind: 'likes_enrichment',
+      subjectId,
+      model: ENRICHMENT_MODEL,
+      request: traceRequest,
+    },
     () =>
       resolveAiClient().messages.create(request, {
         timeout: 60000,
@@ -124,6 +113,9 @@ async function classify(subjectId: string, subject: Record<string, unknown>) {
     (response) => enrichmentSchema.parse(JSON.parse(outputText(response))),
   );
 }
+
+const classify = (subjectId: string, subject: Record<string, unknown>) =>
+  runEnrichment(subjectId, makeEnrichmentRequest(subject));
 
 function mergePatch(
   archive: Awaited<ReturnType<typeof archiveLike>>['patch'],
@@ -244,35 +236,13 @@ async function enrichPhoto(item: LikedItem): Promise<Partial<LikedItem>> {
         },
       ],
       output_config: {
-        format: jsonRequest({
-          type: 'object',
-          properties: {
-            category: { type: 'string' },
-            tags: { type: 'array', items: { type: 'string' } },
-            title: { type: 'string' },
-            description: { type: 'string' },
-            brand: { type: 'string' },
-            extractedText: { type: 'string' },
-            identification: { enum: ['confirmed', 'suggested', 'unknown'] },
-          },
-          required: ['tags', 'identification'],
-          additionalProperties: false,
-        }),
+        format: zodOutputFormat(enrichmentSchema),
       },
     };
-    const classification = await tracedCall(
-      {
-        kind: 'likes_enrichment',
-        subjectId: item.id,
-        model: ENRICHMENT_MODEL,
-        request: redactPhotoTraceRequest(request, attachment),
-      },
-      () =>
-        resolveAiClient().messages.create(request, {
-          timeout: 60000,
-          maxRetries: 0,
-        }),
-      (response) => enrichmentSchema.parse(JSON.parse(outputText(response))),
+    const classification = await runEnrichment(
+      item.id,
+      request,
+      redactPhotoTraceRequest(request, attachment),
     );
     return mergePatch(
       { archiveStatus: 'none' },
@@ -329,23 +299,6 @@ export async function enrichLike(item: LikedItem): Promise<Partial<LikedItem>> {
   }
 }
 
-function chunks(text: string): string[] {
-  const result: string[] = [];
-  let remaining = text;
-  while (remaining.length > IMPORT_CHUNK_CHARS) {
-    let boundary = remaining.lastIndexOf('\n\n', IMPORT_CHUNK_CHARS);
-    if (boundary < IMPORT_CHUNK_CHARS / 2)
-      boundary = remaining.lastIndexOf('\n', IMPORT_CHUNK_CHARS);
-    if (boundary < IMPORT_CHUNK_CHARS / 2)
-      boundary = remaining.lastIndexOf(' ', IMPORT_CHUNK_CHARS);
-    if (boundary < 1) boundary = IMPORT_CHUNK_CHARS;
-    result.push(remaining.slice(0, boundary));
-    remaining = remaining.slice(boundary);
-  }
-  if (remaining) result.push(remaining);
-  return result;
-}
-
 function splitNotesRequest(
   chunk: string,
 ): Anthropic.MessageCreateParamsNonStreaming {
@@ -356,28 +309,7 @@ function splitNotesRequest(
       'Split the supplied notes into every distinct saveable item. For each item, excerpt must be an exact, non-empty verbatim substring of the source. Do not normalize, paraphrase, truncate, or omit any item. Together the excerpts must cover every non-whitespace character, including headings, bullet markers, and punctuation; keep contextual headings with nearby items. If a complete result will not fit, refuse rather than return a partial result. Return JSON only.',
     messages: [{ role: 'user', content: chunk }],
     output_config: {
-      format: jsonRequest({
-        type: 'object',
-        properties: {
-          complete: { const: true },
-          items: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                excerpt: { type: 'string' },
-                title: { type: 'string' },
-                category: { type: 'string' },
-                tags: { type: 'array', items: { type: 'string' } },
-              },
-              required: ['excerpt', 'tags'],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ['complete', 'items'],
-        additionalProperties: false,
-      }),
+      format: zodOutputFormat(splitNotesSchema),
     },
   };
 }
@@ -444,38 +376,37 @@ function importedInputs(
   }));
 }
 
-/** Split a long import without accepting a truncated or paraphrased model response. */
+/** Parse one job-owned bounded import segment without accepting a partial response. */
 export async function splitNotes(
   text: string,
   subjectId: string,
 ): Promise<LikeInput[]> {
   if (!text.trim()) return [];
+  if (text.length > IMPORT_CHUNK_CHARS) {
+    throw new Error('Import chunk exceeded its safety limit');
+  }
   const inputs: LikeInput[] = [];
-  for (const chunk of chunks(text)) {
-    if (chunk.length > IMPORT_CHUNK_CHARS)
-      throw new Error('Import chunk exceeded its safety limit');
-    const request = splitNotesRequest(chunk);
-    const parsed = await tracedCall(
-      { kind: 'likes_import', subjectId, model: IMPORT_MODEL, request },
-      () =>
-        resolveAiClient().messages.create(request, {
-          timeout: 60000,
-          maxRetries: 0,
-        }),
-      (response) => splitNotesSchema.parse(JSON.parse(outputText(response))),
-    );
-    assertSourceCoverage(
-      chunk,
-      parsed.items.map((item) => item.excerpt),
-    );
-    for (const item of parsed.items) {
-      if (!chunk.includes(item.excerpt) || !text.includes(item.excerpt)) {
-        throw new Error(
-          'Import response contained text that does not exactly match the source',
-        );
-      }
-      inputs.push(...importedInputs(item));
+  const request = splitNotesRequest(text);
+  const parsed = await tracedCall(
+    { kind: 'likes_import', subjectId, model: IMPORT_MODEL, request },
+    () =>
+      resolveAiClient().messages.create(request, {
+        timeout: 60000,
+        maxRetries: 0,
+      }),
+    (response) => splitNotesSchema.parse(JSON.parse(outputText(response))),
+  );
+  assertSourceCoverage(
+    text,
+    parsed.items.map((item) => item.excerpt),
+  );
+  for (const item of parsed.items) {
+    if (!text.includes(item.excerpt)) {
+      throw new Error(
+        'Import response contained text that does not exactly match the source',
+      );
     }
+    inputs.push(...importedInputs(item));
   }
   return inputs;
 }

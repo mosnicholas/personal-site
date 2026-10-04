@@ -23,39 +23,47 @@ import {
   updateSettings,
 } from './likes-store.js';
 import type { LikeInput } from '../../shared/likes.js';
+import {
+  readBoundedBytes,
+  readBoundedText,
+  RequestSizeError,
+} from './likes-request.js';
 
 async function body(
   request: Request,
   maxBytes = 500000,
 ): Promise<Record<string, unknown>> {
-  const declared = Number(request.headers.get('content-length') ?? 0);
-  if (declared > maxBytes) throw new LikesError('Request is too large', 413);
-  const reader = request.body?.getReader();
-  if (!reader) throw new LikesError('Provide a request body');
-  let bytes = 0;
-  const chunks: Uint8Array[] = [];
+  if (!request.body) throw new LikesError('Provide a request body');
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.length;
-      if (bytes > maxBytes) {
-        await reader.cancel();
-        throw new LikesError('Request is too large', 413);
-      }
-      chunks.push(value);
-    }
-    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    const parsed: unknown = JSON.parse(
+      await readBoundedText(request, maxBytes),
+    );
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       throw new Error();
     return parsed as Record<string, unknown>;
   } catch (error) {
+    if (error instanceof RequestSizeError)
+      throw new LikesError(error.message, 413);
     if (error instanceof LikesError) throw error;
     throw new LikesError('Provide a valid JSON object');
   }
 }
+async function uploadForm(request: Request): Promise<FormData> {
+  const bytes = await readBoundedBytes(request, 4 * 1024 * 1024);
+  return new Request(request.url, {
+    method: 'POST',
+    headers: { 'Content-Type': request.headers.get('content-type') ?? '' },
+    body: bytes,
+  })
+    .formData()
+    .catch(() => {
+      throw new LikesError('Provide a multipart upload');
+    });
+}
 export async function handleLikesRequest(request: Request): Promise<Response> {
   const response = await dispatch(request).catch((error) => {
+    if (error instanceof RequestSizeError)
+      return Response.json({ error: error.message }, { status: 413 });
     if (error instanceof LikesError)
       return Response.json({ error: error.message }, { status: error.status });
     console.warn(
@@ -108,7 +116,7 @@ async function dispatch(request: Request): Promise<Response> {
     });
   }
   if (op === 'screenshot' && method === 'POST') {
-    const form = await request.formData();
+    const form = await uploadForm(request);
     const file = form.get('file');
     if (
       !(file instanceof File) ||
@@ -135,23 +143,7 @@ async function dispatch(request: Request): Promise<Response> {
     );
   }
   if (op === 'upload' && method === 'POST') {
-    // Vercel's function body limit is 4.5 MB. Client-direct Blob upload can be
-    // added later for larger files; these captures fit the portable endpoint.
-    const length = Number(request.headers.get('content-length') ?? 0);
-    if (length > 4 * 1024 * 1024)
-      throw new LikesError('Compress this upload to under 4 MB', 413);
-    const buffer = await request.arrayBuffer();
-    if (buffer.byteLength > 4 * 1024 * 1024)
-      throw new LikesError('Compress this upload to under 4 MB', 413);
-    const form = await new Request(request.url, {
-      method: 'POST',
-      headers: { 'Content-Type': request.headers.get('content-type') ?? '' },
-      body: buffer,
-    })
-      .formData()
-      .catch(() => {
-        throw new LikesError('Provide a multipart upload');
-      });
+    const form = await uploadForm(request);
     const content = form.get('file');
     if (!(content instanceof File))
       throw new LikesError('Choose a file to upload');
