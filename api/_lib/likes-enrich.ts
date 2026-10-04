@@ -26,9 +26,9 @@ import type { Like } from '../../shared/likes.js';
 
 const MODEL = 'claude-haiku-4-5';
 
-const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. For each save, work out what it is and fill in the details that will let them recognize it at a glance and find it later.
+const IDENTIFY_PROMPT = `Someone saved this to their collection of things they like: links, notes and photos they keep so they can find them again and remember what each one was. Say exactly what it is: brand and model for a product, the name of a place or work. When that isn't clear from what they saved, like a product in a photo or a place named in a note, search the web to pin it down. Their text, note and photo show what caught their eye: when they single out one version, like a color, a material, or one of several models on a page, say which.`;
 
-When a save points at something specific, like a product in a photo or a place or book named in a note, search the web to identify it exactly. Their text, note and photo show what caught their eye: when they single out one version of something, like a color, a material, or one of several models on a page, describe that version. Reuse one of the collection's categories when one fits. Then call save_details.`;
+const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. From what they saved and what it turned out to be, fill in the details that will let them recognize it at a glance and find it later. When they singled out one version of something, the details are about that version. Reuse one of the collection's categories when one fits.`;
 
 const WEB_SEARCH: Anthropic.WebSearchTool20250305 = {
   type: 'web_search_20250305',
@@ -58,13 +58,8 @@ const SAVE_DETAILS: Anthropic.Tool = {
         description: 'One broad category, like clothing or restaurants',
       },
       tags: { type: 'array', items: { type: 'string' } },
-      sources: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'URLs of the search results that identified it',
-      },
     },
-    required: ['title', 'description', 'category', 'tags', 'sources'],
+    required: ['title', 'description', 'category', 'tags'],
     additionalProperties: false,
   },
 };
@@ -99,6 +94,10 @@ function metaTags(html: string): Map<string, string> {
   return tags;
 }
 
+// Some sites turn away requests that don't look like a browser
+const USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
+
 /**
  * The linked page's title, description, preview image and text. Many sites
  * turn away servers; then Haiku goes by the link alone
@@ -106,11 +105,7 @@ function metaTags(html: string): Map<string, string> {
 async function fetchPage(url: string): Promise<Page | undefined> {
   try {
     const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36',
-        Accept: 'text/html',
-      },
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) return undefined;
@@ -134,12 +129,46 @@ async function fetchPage(url: string): Promise<Page | undefined> {
   }
 }
 
-// After searching, Haiku sometimes copies the citation markup it reads
-// (`<cite index="1-6">`) into what it writes
-const plain = (text: string) => text.replace(/<\/?cite\b[^>]*>/g, '').trim();
+/** The image file's size in bytes, or 0 if it doesn't load */
+async function imageSize(url: string): Promise<number> {
+  try {
+    const response = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.headers.get('content-type')?.startsWith('image/')) return 0;
+    return response.ok ? (await response.arrayBuffer()).byteLength : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The sharpest of the preview images of the linked page and the source
+ * pages, taken to be the biggest file: some sites' preview images are small
+ * thumbnails. If none can be loaded from here, the linked page's
+ */
+async function bestImage(page: Page | undefined, sources: Like['sources']) {
+  const pages = await Promise.all(
+    sources.slice(0, 5).map((source) => fetchPage(source.url)),
+  );
+  const urls = [
+    ...new Set(
+      [page, ...pages]
+        .map((candidate) => candidate?.imageUrl)
+        .filter((url): url is string => Boolean(url)),
+    ),
+  ];
+  if (urls.length < 2) return urls[0] ?? null;
+  const sizes = await Promise.all(urls.map(imageSize));
+  const biggest = Math.max(...sizes);
+  return biggest > 0 ? urls[sizes.indexOf(biggest)] : urls[0];
+}
 
 /** The request without the photo's bytes, which don't belong in the trace log */
-const withoutPhoto = (request: Anthropic.MessageCreateParamsNonStreaming) => ({
+const withoutPhoto = <Request extends { messages: Anthropic.MessageParam[] }>(
+  request: Request,
+) => ({
   ...request,
   messages: request.messages.map((message) =>
     typeof message.content === 'string'
@@ -155,54 +184,52 @@ const withoutPhoto = (request: Anthropic.MessageCreateParamsNonStreaming) => ({
   ),
 });
 
-/**
- * Asks Haiku for the like's details. It searches first when it needs to and
- * finishes with a save_details call; a long search can pause the turn, which
- * is resumed by sending it back
- */
-async function askForDetails(like: Like, page?: Page, photo?: Buffer) {
-  const save = {
-    url: like.url,
-    title: like.title || undefined,
-    text: like.text || undefined,
-    note: like.note || undefined,
-    page,
-  };
-  const messages: Anthropic.MessageParam[] = [
-    {
-      role: 'user',
-      content: [
-        ...(photo
-          ? [
-              {
-                type: 'image' as const,
-                source: {
-                  type: 'base64' as const,
-                  media_type: 'image/jpeg' as const,
-                  data: photo.toString('base64'),
-                },
-              },
-            ]
-          : []),
-        { type: 'text', text: JSON.stringify(save, null, 2) },
-      ],
-    },
+/** The save as Haiku sees it: the photo, then the rest as JSON */
+function saveContent(
+  save: Record<string, unknown>,
+  photo?: Buffer,
+): Anthropic.ContentBlockParam[] {
+  return [
+    ...(photo
+      ? [
+          {
+            type: 'image' as const,
+            source: {
+              type: 'base64' as const,
+              media_type: 'image/jpeg' as const,
+              data: photo.toString('base64'),
+            },
+          },
+        ]
+      : []),
+    { type: 'text', text: JSON.stringify(save, null, 2) },
   ];
-  const categories = await likeCategories();
-  // Search results seen, url -> title: sources must be among them
-  const results = new Map<string, string>();
+}
 
+/**
+ * Haiku says what the like is, searching the web when it needs to; the
+ * pages its answer cites are the sources. A long search pauses the turn,
+ * which is resumed by sending it back.
+ *
+ * This is a separate request from filling in the details because after a
+ * search Haiku cites as it writes: in a tool call, that came out as
+ * citation markup around a quoted fragment instead of a description
+ */
+async function identify(like: Like, content: Anthropic.ContentBlockParam[]) {
+  const messages: Anthropic.MessageParam[] = [{ role: 'user', content }];
+  let answer = '';
+  const sources = new Map<string, string>();
   for (let turn = 0; turn < MAX_TURNS; turn += 1) {
     const request = {
       model: MODEL,
       max_tokens: 4096,
       thinking: { type: 'disabled' as const },
-      system: `${SYSTEM_PROMPT}\n\nCategories so far: ${categories.join(', ') || '(none yet)'}`,
-      tools: [WEB_SEARCH, SAVE_DETAILS],
+      system: IDENTIFY_PROMPT,
+      tools: [WEB_SEARCH],
       messages: [...messages],
     };
     let response!: Anthropic.Message;
-    const details = await tracedCall(
+    answer += await tracedCall(
       {
         kind: 'likes_enrichment',
         subjectId: like.id,
@@ -211,60 +238,99 @@ async function askForDetails(like: Like, page?: Page, photo?: Buffer) {
       },
       async () => (response = await getAnthropic().messages.create(request)),
       (message) =>
-        message.content.find(
-          (block): block is Anthropic.ToolUseBlock =>
-            block.type === 'tool_use' && block.name === 'save_details',
-        )?.input as Omit<LikeDetails, 'imageUrl' | 'sources'> & {
-          sources: string[];
-        },
+        message.content
+          .map((block) => (block.type === 'text' ? block.text : ''))
+          .join(''),
     );
     for (const block of response.content) {
-      if (
-        block.type === 'web_search_tool_result' &&
-        Array.isArray(block.content)
-      ) {
-        for (const result of block.content) {
-          results.set(result.url, result.title);
+      if (block.type !== 'text') continue;
+      for (const citation of block.citations ?? []) {
+        if (
+          citation.type === 'web_search_result_location' &&
+          !sources.has(citation.url)
+        ) {
+          sources.set(citation.url, citation.title ?? citation.url);
         }
       }
     }
-    if (details) {
-      return {
-        title: plain(details.title),
-        description: plain(details.description),
-        category: plain(details.category),
-        tags: [...new Set(details.tags.map((tag) => plain(tag).toLowerCase()))],
-        sources: details.sources
-          .filter((url) => results.has(url))
-          .map((url) => ({ url, title: results.get(url)! })),
-      };
-    }
-    if (response.stop_reason !== 'pause_turn') {
-      throw new Error(
-        `Haiku stopped without saving details (${response.stop_reason})`,
-      );
-    }
+    if (response.stop_reason !== 'pause_turn') break;
     messages.push({ role: 'assistant', content: response.content });
   }
-  throw new Error('Haiku kept searching without saving details');
+  return {
+    answer: answer.trim(),
+    sources: [...sources].map(([url, title]) => ({ url, title })),
+  };
+}
+
+/** Haiku fills in the details from the save and what it turned out to be */
+async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
+  const categories = await likeCategories();
+  const request = {
+    model: MODEL,
+    max_tokens: 4096,
+    system: `${SYSTEM_PROMPT}\n\nCategories so far: ${categories.join(', ') || '(none yet)'}`,
+    tools: [SAVE_DETAILS],
+    tool_choice: { type: 'tool' as const, name: SAVE_DETAILS.name },
+    messages: [{ role: 'user' as const, content }],
+  };
+  const details = await tracedCall(
+    {
+      kind: 'likes_enrichment',
+      subjectId: like.id,
+      model: MODEL,
+      request: withoutPhoto(request),
+    },
+    () => getAnthropic().messages.create(request),
+    (message) => {
+      const call = message.content.find(
+        (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+      );
+      if (!call) {
+        throw new Error(
+          `Haiku stopped without saving details (${message.stop_reason})`,
+        );
+      }
+      return call.input as Omit<LikeDetails, 'imageUrl' | 'sources'>;
+    },
+  );
+  return {
+    title: details.title.trim(),
+    description: details.description.trim(),
+    category: details.category.trim(),
+    tags: [...new Set(details.tags.map((tag) => tag.trim().toLowerCase()))],
+  };
 }
 
 async function enrichLike(like: Like): Promise<void> {
   try {
     const page = like.url ? await fetchPage(like.url) : undefined;
-    const photo = like.photoUrl ? await photoBytes(like.id) : undefined;
     // Saved with everything filled in (Claude often knows what it is), so
     // only the preview image is missing
     const complete =
       like.title && like.description && like.category && like.tags.length;
-    const details = complete
-      ? { ...like, category: like.category!, sources: [] }
-      : await askForDetails(like, page, photo);
-    // The linked page's image, else the first source page that has one
-    let imageUrl = page?.imageUrl ?? null;
-    for (const source of details.sources.slice(0, 3)) {
-      imageUrl ??= (await fetchPage(source.url))?.imageUrl ?? null;
+    let details: Omit<LikeDetails, 'imageUrl'>;
+    if (complete) {
+      details = { ...like, category: like.category!, sources: [] };
+    } else {
+      const photo = like.photoUrl ? await photoBytes(like.id) : undefined;
+      const save = {
+        url: like.url,
+        title: like.title || undefined,
+        text: like.text || undefined,
+        note: like.note || undefined,
+        page,
+      };
+      const { answer, sources } = await identify(
+        like,
+        saveContent(save, photo),
+      );
+      const found = await organize(
+        like,
+        saveContent({ ...save, what_it_is: answer || undefined }, photo),
+      );
+      details = { ...found, sources };
     }
+    const imageUrl = await bestImage(page, details.sources);
     await finishLike(like.id, { ...details, imageUrl });
   } catch (error) {
     console.error(`Could not enrich like ${like.id}:`, error);
