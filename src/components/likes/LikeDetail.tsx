@@ -1,0 +1,209 @@
+import { useEffect, useState } from 'react';
+
+import type { Like, LikePatch } from '../../../shared/likes';
+import { api, errorMessage, json, likeImage, savedDate } from './api';
+
+interface Draft {
+  title: string;
+  note: string;
+  description: string;
+  category: string;
+  tags: string;
+}
+
+const draftOf = (like: Like): Draft => ({
+  title: like.title,
+  note: like.note,
+  description: like.description,
+  category: like.category ?? '',
+  tags: like.tags.join(', '),
+});
+
+/** One like, to edit, retry or delete */
+const LikeDetail = ({
+  like,
+  onChange,
+  onClose,
+}: {
+  like: Like;
+  onChange: () => void;
+  onClose: () => void;
+}) => {
+  const [draft, setDraft] = useState(() => draftOf(like));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const image = likeImage(like);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    setError('');
+    try {
+      await action();
+      onChange();
+      return true;
+    } catch (reason) {
+      setError(errorMessage(reason));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Only what I changed, so details filled in while this was open survive
+  const changes = () => {
+    const before = draftOf(like);
+    const patch: LikePatch = {};
+    for (const field of ['title', 'note', 'description', 'category'] as const) {
+      if (draft[field] !== before[field]) patch[field] = draft[field];
+    }
+    if (draft.tags !== before.tags) {
+      patch.tags = draft.tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+    }
+    return patch;
+  };
+
+  const field = (name: keyof Draft, label: string, rows = 0) => (
+    <label>
+      {label}
+      {rows ? (
+        <textarea
+          onChange={(event) =>
+            setDraft({ ...draft, [name]: event.target.value })
+          }
+          rows={rows}
+          value={draft[name]}
+        />
+      ) : (
+        <input
+          onChange={(event) =>
+            setDraft({ ...draft, [name]: event.target.value })
+          }
+          value={draft[name]}
+        />
+      )}
+    </label>
+  );
+
+  return (
+    <div className="likes-detail-backdrop" onMouseDown={onClose}>
+      <aside
+        aria-label="Like"
+        className="likes-detail"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button
+          aria-label="Close"
+          className="likes-close"
+          onClick={onClose}
+          type="button"
+        >
+          ×
+        </button>
+        {image && (
+          <img
+            alt=""
+            className="likes-detail-image"
+            referrerPolicy="no-referrer"
+            src={image}
+          />
+        )}
+        <p className="likes-meta">
+          {like.category ?? 'uncategorized'} · saved {savedDate(like)} from{' '}
+          {like.source}
+        </p>
+        {like.status === 'pending' && (
+          <p className="likes-status">Organizing…</p>
+        )}
+        {like.status === 'failed' && (
+          <p className="likes-status likes-status-failed">
+            Couldn’t organize this: {like.error}
+          </p>
+        )}
+        {like.text && <p className="likes-text">{like.text}</p>}
+        {like.url && (
+          <a
+            className="likes-link"
+            href={like.url}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {like.url}
+          </a>
+        )}
+
+        {field('title', 'Title')}
+        {field('note', 'Why I like it', 3)}
+        {field('description', 'Description', 3)}
+        {field('category', 'Category')}
+        {field('tags', 'Tags')}
+
+        {like.sources.length > 0 && (
+          <div className="likes-sources">
+            <p>Identified from</p>
+            {like.sources.map((source) => (
+              <a
+                href={source.url}
+                key={source.url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {source.title || source.url}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {error && <p className="likes-error">{error}</p>}
+        <div className="likes-actions">
+          <button
+            disabled={busy}
+            onClick={() =>
+              void run(() => api(`?id=${like.id}`, json('PATCH', changes())))
+            }
+            type="button"
+          >
+            Save
+          </button>
+          {like.status !== 'ready' && (
+            <button
+              disabled={busy}
+              onClick={() =>
+                void run(() =>
+                  api(`?op=retry&id=${like.id}`, { method: 'POST' }),
+                )
+              }
+              type="button"
+            >
+              Retry
+            </button>
+          )}
+          <button
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm('Delete this like?')) return;
+              void run(() => api(`?id=${like.id}`, { method: 'DELETE' })).then(
+                (deleted) => deleted && onClose(),
+              );
+            }}
+            type="button"
+          >
+            Delete
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+};
+
+export default LikeDetail;

@@ -1,0 +1,369 @@
+.likes-page,
+.likes-login {
+  --likes-ink: #f7f7f5;
+  --likes-soft: #b6b6b1;
+  --likes-muted: #767672;
+  --likes-line: #2a2a28;
+  min-height: 100vh;
+  color: var(--likes-ink);
+  font-family: 'Roboto Mono', monospace;
+}
+
+.likes-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 28px 40px 80px;
+}
+
+.likes-page button,
+.likes-page input,
+.likes-page textarea,
+.likes-page select,
+.likes-login button,
+.likes-login input {
+  font: inherit;
+  color: var(--likes-ink);
+  border: 1px solid var(--likes-line);
+  border-radius: 3px;
+  padding: 9px 11px;
+  background: #080808;
+}
+
+.likes-page button,
+.likes-login button {
+  border-color: #5b5b56;
+  background: transparent;
+  cursor: pointer;
+}
+
+.likes-page button:hover,
+.likes-login button:hover {
+  border-color: var(--likes-ink);
+}
+
+.likes-page button:disabled,
+.likes-login button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.likes-page input:focus,
+.likes-page textarea:focus,
+.likes-page select:focus,
+.likes-login input:focus {
+  outline: none;
+  border-color: #b8b8b2;
+}
+
+.likes-page textarea {
+  resize: vertical;
+}
+
+.likes-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--likes-line);
+}
+
+.likes-header h1,
+.likes-login h1 {
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.likes-header h1 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.likes-page .likes-text-button {
+  border: 0;
+  padding: 0;
+  color: var(--likes-soft);
+}
+
+.likes-capture {
+  display: grid;
+  grid-template-columns: 1.2fr 1.8fr 1.1fr auto auto;
+  gap: 8px;
+  align-items: start;
+  padding: 32px 0 20px;
+}
+
+.likes-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  max-width: 160px;
+  padding: 5px 12px;
+  border: 1px dashed #454541;
+  border-radius: 3px;
+  color: var(--likes-soft);
+  font-size: 0.75rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.likes-file input {
+  display: none;
+}
+
+.likes-capture .likes-error {
+  grid-column: 1 / -1;
+}
+
+.likes-import {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--likes-line);
+  color: var(--likes-soft);
+  font-size: 0.8rem;
+}
+
+.likes-import summary {
+  cursor: pointer;
+}
+
+.likes-import form {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.likes-import textarea {
+  flex: 1;
+}
+
+.likes-filters {
+  display: flex;
+  gap: 10px;
+  padding: 24px 0;
+}
+
+.likes-filters input {
+  width: min(360px, 100%);
+}
+
+.likes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+  gap: 10px;
+}
+
+.likes-page .likes-card {
+  /* A column from the top, however tall its row */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border-color: var(--likes-line);
+  border-radius: 4px;
+  text-align: left;
+}
+
+.likes-page .likes-card:hover {
+  border-color: #777770;
+}
+
+.likes-card img,
+.likes-card-empty {
+  display: block;
+  width: 100%;
+  height: 170px;
+  object-fit: cover;
+  background: linear-gradient(135deg, #141412, #080808);
+}
+
+.likes-card-body {
+  padding: 14px;
+}
+
+.likes-card h2 {
+  font-family: 'Roboto', sans-serif;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.likes-card-body > p:not(.likes-meta, .likes-status) {
+  margin-top: 8px;
+  color: var(--likes-soft);
+  font-family: 'Roboto', sans-serif;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.likes-meta {
+  margin-bottom: 7px;
+  color: var(--likes-muted);
+  font-size: 0.67rem;
+}
+
+.likes-status {
+  margin-top: 10px;
+  color: var(--likes-muted);
+  font-size: 0.7rem;
+}
+
+.likes-status-failed,
+.likes-error {
+  color: #e5958a;
+  font-size: 0.75rem;
+  margin-top: 8px;
+}
+
+.likes-muted {
+  color: var(--likes-muted);
+  font-size: 0.8rem;
+  margin: 12px 0;
+}
+
+.likes-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.likes-detail {
+  position: relative;
+  width: min(510px, 100%);
+  overflow-y: auto;
+  padding: 30px;
+  background: #0d0d0c;
+  border-left: 1px solid var(--likes-line);
+}
+
+.likes-page .likes-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  border: 0;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.likes-detail-image {
+  width: 100%;
+  max-height: 310px;
+  object-fit: cover;
+  margin: 10px 0 18px;
+}
+
+.likes-text {
+  margin-top: 12px;
+  color: var(--likes-soft);
+  font-family: 'Roboto', sans-serif;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.likes-link,
+.likes-sources a {
+  display: block;
+  margin-top: 10px;
+  color: var(--likes-ink);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  text-underline-offset: 3px;
+}
+
+.likes-detail label {
+  display: block;
+  margin-top: 16px;
+  color: var(--likes-soft);
+  font-size: 0.72rem;
+}
+
+.likes-detail label input,
+.likes-detail label textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.likes-sources {
+  margin-top: 20px;
+  color: var(--likes-soft);
+  font-size: 0.72rem;
+}
+
+.likes-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.likes-login {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.likes-login form {
+  display: grid;
+  gap: 12px;
+  width: min(320px, 100%);
+}
+
+@media (max-width: 900px) {
+  .likes-page {
+    padding: 20px 16px 50px;
+  }
+
+  .likes-capture {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .likes-capture input,
+  .likes-capture textarea {
+    grid-column: 1 / -1;
+  }
+
+  .likes-file {
+    max-width: none;
+  }
+
+  .likes-import form,
+  .likes-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .likes-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .likes-card img,
+  .likes-card-empty {
+    height: 120px;
+  }
+
+  .likes-card-body {
+    padding: 10px;
+  }
+
+  .likes-card h2 {
+    font-size: 0.85rem;
+  }
+
+  .likes-detail {
+    padding: 24px 16px;
+  }
+}

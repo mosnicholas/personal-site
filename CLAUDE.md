@@ -1,20 +1,23 @@
 # Personal Site - Code Structure & Context
 
 ## Project Overview
-Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Four parts:
+Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Six parts:
 
 1. **Landing page** - "nicholas moschopoulos" scrambles in, becomes a glitching "nimo", and the tagline streams in like an LLM response.
 2. **Terminal mode** (`?mode=terminal`, or press `~`/`t` on the landing page) - retro boot sequence, then a chat with a Claude-powered assistant about nimo.
 3. **Reading workflows** (migrated from n8n) - a Readwise webhook that summarizes and tags new documents, a daily sync that mirrors the library into Postgres, weekly crons that rebalance the taxonomy, write a tag glossary, and email a summary of the week's reading, and a monthly cron that emails a longer synthesis.
 4. **Reading map** (`/reading`, public) - a force-directed map of the tags, clustered, with a timeline and per-tag briefs, served from the mirror.
+5. **Likes** (`/likes`, private, just for nimo) - links, notes and photos he likes, organized by Haiku, saved from the page or over MCP, with a monthly email resurfacing old ones.
+6. **MCP server** (`/api/mcp`, private) - lets Claude and ChatGPT save likes and search and read both likes and the reading mirror.
 
 ## Tech Stack
 - **React 19.3** + **TypeScript 6.0** (strict), vanilla CSS
 - **Vite 8** for dev server and build (migrated from the deprecated Create React App)
 - **Vercel** for hosting; `/api/*.ts` are Vercel Functions
 - **Node 24 LTS** (`.nvmrc`), **npm** (`package-lock.json`)
-- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat and tagging, `claude-sonnet-5-5` for document summaries and tag briefs, `claude-opus-5-5` for the weekly tag rebalance, glossary and summary, and the monthly synthesis
+- **Anthropic SDK** for all AI: `claude-haiku-4-5` for terminal chat, tagging and likes, `claude-sonnet-5-5` for document summaries and tag briefs, `claude-opus-5-5` for the weekly tag rebalance, glossary and summary, and the monthly synthesis
 - **Neon Postgres** (`@neondatabase/serverless`, `DATABASE_URL`) for the LLM trace log and dated model prices, the library mirror with each saved document's full text and our summary, and the tag glossary
+- **Vercel Blob** (private store; OIDC on Vercel, `BLOB_READ_WRITE_TOKEN` locally) for likes photos; `@vercel/functions` for `waitUntil`
 - **Resend** for email (personal account, `nimo.fyi` verified; sender `reader@nimo.fyi`, recipient `WEEKLY_SUMMARY_RECIPIENT_EMAIL`)
 - ESLint 10 (flat config, typescript-eslint, react-hooks) + Prettier 3
 
@@ -27,14 +30,15 @@ personal-site/
 ├── src/
 │   ├── index.tsx              # createRoot + font imports
 │   ├── index.css              # All styles and animations
-│   ├── App.tsx                # Picks Landing, TerminalMode, or the lazy-loaded /reading page from the URL
+│   ├── App.tsx                # Picks Landing, TerminalMode, or the lazy-loaded /reading or /likes page from the URL
 │   ├── components/
 │   │   ├── TextScrambler.tsx  # Scramble animation, fires onComplete after holdMs
 │   │   ├── StreamingText.tsx  # Char-by-char reveal
 │   │   ├── Tagline.tsx        # "adventurer, cook, and founder of Junior" + link
 │   │   ├── TerminalMode.tsx   # Boot sequence (staged timeouts) then chat
 │   │   ├── ChatInterface.tsx  # Terminal chat UI, POSTs to /api/chat
-│   │   └── reading/           # /reading: tag map, cluster legend, timeline, tag panel
+│   │   ├── reading/           # /reading: tag map, cluster legend, timeline, tag panel
+│   │   └── likes/             # /likes: sign in, capture, import, grid, edit panel
 │   ├── hooks/useScrambledText.ts
 │   └── utils/textScramble.ts  # Scramble algorithm
 ├── api/
@@ -47,6 +51,8 @@ personal-site/
 │   ├── reading-synthesis.ts   # 1st of the month 10am UTC cron: email a synthesis of the last 90 days
 │   ├── reading-graph.ts       # Public, CDN-cached data for /reading
 │   ├── update-prices.ts       # Daily 5am UTC cron: record model price changes from Anthropic's pricing page
+│   ├── likes.ts               # /likes API and the likes crons (daily leftovers, monthly email)
+│   ├── mcp.ts                 # The MCP server and its OAuth endpoints (rewritten here as ?op=)
 │   ├── tsconfig.json          # Node/ESM config; Vercel also uses it to compile /api
 │   └── _lib/                  # Helpers; underscore keeps Vercel from deploying them as functions
 │       ├── anthropic.ts       # Shared Anthropic client (checks ANTHROPIC_API_KEY)
@@ -55,6 +61,11 @@ personal-site/
 │       ├── documents.ts       # The mirror: `documents` (upserts, our summaries, tag counts), `document_texts`, sync state
 │       ├── email.ts           # Resend client
 │       ├── glossary.ts        # Opus definitions + clusters, Sonnet tag briefs (`tags` table)
+│       ├── likes.ts           # The `likes` table and photos in Blob: list, search, save, edit, claim for enrichment
+│       ├── likes-enrich.ts    # Haiku fills in title/description/category/tags (web search for photos and notes); splits pasted notes
+│       ├── owner-auth.ts      # Owner key: session cookie, bearer, and a stateless OAuth server for MCP clients
+│       ├── mcp.ts             # Minimal MCP server (save, search, get) over likes and reading, no SDK
+│       ├── likes-digest.ts    # Monthly email of a few old likes
 │       ├── graph.ts           # Queries behind /api/reading-graph
 │       ├── pricing.ts         # Dated model prices (`model_prices`), price lookup, the cost of a call from its usage
 │       ├── prices-check.ts    # Daily check of Anthropic's pricing page: parse, diff, record changes, fill missing costs
@@ -68,11 +79,12 @@ personal-site/
 │       ├── tagging.ts         # Haiku tagger: reuses existing tags, creates new ones when needed
 │       ├── taxonomy.ts        # `other` tag, tag normalization, cached tag list with counts and definitions
 │       └── traces.ts          # Saves every LLM call to Postgres (`llm_traces`)
+├── shared/likes.ts            # The Like type, shared by the API and /likes
 ├── scripts/eval/             # Summary eval: pick documents, write candidates, judge (API or Claude Code agents), report; see its README
 ├── vite.config.ts
 ├── eslint.config.js
 ├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
-├── vercel.json                # framework: vite, fluid: true (300s functions), /reading rewrite, crons
+├── vercel.json                # framework: vite, fluid: true (300s functions), /reading and /likes rewrites, OAuth paths, crons
 └── .npmrc                     # min-release-age=7
 ```
 
@@ -103,10 +115,24 @@ personal-site/
 - Weekly, Opus 5.5 returns a structured plan (`merges`, `other_documents`), merging synonyms and one-off tags (used by 1-2 documents) into the tag that covers them; code validates it (no merging into/out of `other`, only known tags and documents) and rewrites tags with Readwise's bulk update
 - Earlier runs' merges (`loadAppliedRenames()`, read from rebalance traces, newest wins) are passed to Opus as `earlier_merges`, applied to returning retired tags, and used to resolve plan targets, so a plan can't reverse an earlier merge
 
+### Likes (`/likes`)
+- For nimo alone: keep it simple. No multi-user machinery, idempotency keys, delivery leases, export, or "untrusted input" prompt rules
+- One table, `likes` (created in `db.ts`); a photo is a private Vercel Blob (JPEG, resized to 2048px in the browser to stay under Vercel's 4.5 MB request limit) streamed back through `?op=photo`
+- Saving answers right away; enrichment runs after the response (`waitUntil`) and daily at 11am UTC for leftovers. Haiku 4.5 gets the link's fetched page (og: title, description, image, text), the text and note, and the photo, may run up to 10 web searches (resuming paused turns, 6 requests at most; thinking off), and finishes with a strict `save_details` tool call. Sources are only kept if they were real search results. Enrichment fills only empty fields, so anything I set (or Claude set over MCP) stays. Failures retry after 5 minutes, 3 tries, then show a Retry button
+- Saving a link that's already saved returns the existing like
+- Pasted notes are split by Haiku (structured output) in ~8k-character pieces; a piece that fails is saved whole
+- Auth (`owner-auth.ts`, shared with the MCP server): `PERSONAL_SITE_OWNER_KEY` signs in on the page (30-day HttpOnly cookie), works as a bearer token, and signs OAuth codes and tokens (HMAC, purpose-bound, no tables). Changing the key signs everything out
+- Monthly email (1st, noon UTC): 5 ready likes saved over 30 days ago, least recently emailed first, via `sendReadingEmail`
+
+### MCP server (`/api/mcp`)
+- For Claude and ChatGPT connectors: OAuth discovery (`/.well-known/...`), dynamic registration (anyone may register; I approve by typing the key on the consent page), PKCE, 1-day access and 90-day refresh tokens, all stateless signed tokens
+- Hand-written JSON-RPC (stateless, JSON responses, no SSE), not the MCP SDK (~100 dependencies). Tools are entries in `TOOLS`; add a source by adding tools or results there
+- Three tools: `save` (a like; `photo` is a ChatGPT file param, `_meta["openai/fileParams"]`, or any public image URL, fetched and resized to JPEG by Blob `putImage`, which needs Vercel's OIDC), `search` (likes and saved reading, every word must match, `source` and `since` filters), `get` (a like with its photo as an image, or a saved document with its summary and up to 100k chars of text). Feed items aren't included. Claude can't pass chat images to tools, so photos from Claude only work as URLs
+
 ### LLM traces
-- Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `document_summary`, `rebalance`, `tag_glossary`, `tag_brief`, `weekly_summary`, `reading_synthesis`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
-- Token usage as reported by the API is stored in columns: `response_model` (the model that answered), `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `cost_usd` computed at write time from the `model_prices` table (input, 5-minute and 1-hour cache writes, cache reads and output each at their own rate)
-- `model_prices` has one row per model per price with `effective_from`; `priceAt` picks the latest row in effect at the call's time (the earliest row for calls before it), matching the model ID exactly after dropping a date suffix (`claude-opus-5` must not price `claude-opus-5-5`). `SEED_PRICES` in `pricing.ts` only seeds the table. `update-prices.ts` (daily) parses the Markdown pricing page with no LLM, records new models and changed prices dated today, emails a diff when anything changed or when the check starts failing, and fills `cost_usd` for calls that had no price. Costs assume standard rates (no batch, fast mode or `inference_geo`); if one of those is used, the pricing needs a multiplier
+- Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `document_summary`, `rebalance`, `tag_glossary`, `tag_brief`, `weekly_summary`, `reading_synthesis`, `likes_enrichment`, `likes_import`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
+- Token usage as reported by the API is stored in columns: `response_model` (the model that answered), `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `cost_usd` computed at write time from the `model_prices` table (input, 5-minute and 1-hour cache writes, cache reads, output and web searches each at their own rate)
+- `model_prices` has one row per model per price with `effective_from` (`web_search` is USD per 1,000 searches, the same for every model); `priceAt` picks the latest row in effect at the call's time (the earliest row for calls before it), matching the model ID exactly after dropping a date suffix (`claude-opus-5` must not price `claude-opus-5-5`). `SEED_PRICES` in `pricing.ts` only seeds the table. `update-prices.ts` (daily) parses the Markdown pricing page with no LLM (the model table, plus the web search price from its prose), records new models and changed prices dated today, emails a diff when anything changed or when the check starts failing, and fills `cost_usd` for calls that had no price. Costs assume standard rates (no batch, fast mode or `inference_geo`); if one of those is used, the pricing needs a multiplier
 - Schema changes to existing tables go in `MIGRATIONS` in `api/_lib/db.ts` (run once each; the applied version is in `sync_state` as `schema`)
 - Rebalance traces also store every applied change (`id`, `title`, `before` → `after` tags), which is the undo log, and `renames`, which later runs build on
 - Neon's free plan stops writes at 1 GB (all databases in the project) without warning, so the weekly email ends with `describeTraceLog()`: size and % of 1 GB (a warning from 80%), call count, the last 7 days' AI spend, a warning naming any model with no price, and a warning if the daily price check is failing or hasn't run for 3 days
@@ -164,6 +190,7 @@ npm run eval:pick -- <run>   # then eval:summarize, eval:judge (or eval:agents),
 - **Tagging**: `MAX_TAGS` and rules in `SYSTEM_PROMPT` in `api/_lib/tagging.ts`; taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
 - **Reading models**: `SUMMARY_MODEL` in `api/_lib/summarize.ts` (document summaries), `PLAN_MODEL` in `api/_lib/rebalance.ts`, `GLOSSARY_MODEL` / `BRIEF_MODEL` in `api/_lib/glossary.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts` (weekly email)
 - **Chat rate limits**: `perIpLimit` / `overallLimit` in `api/chat.ts`
+- **Likes**: `SYSTEM_PROMPT` / `SPLIT_PROMPT` in `api/_lib/likes-enrich.ts`; MCP tools and instructions in `api/_lib/mcp.ts`; email in `api/_lib/likes-digest.ts`
 
 ## Follow-up work
 - `docs/plans/align-document-summaries.md`: evaluate document summaries (faithfulness, coverage, length, usefulness) with calibrated LLM judges, then pick or distill the summarizer. Not started; read it before changing `SUMMARY_MODEL` or the summary prompt

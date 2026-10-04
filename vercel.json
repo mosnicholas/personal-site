@@ -10,6 +10,26 @@
     {
       "source": "/reading/",
       "destination": "/index.html"
+    },
+    {
+      "source": "/likes",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/likes/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/api/oauth/:step",
+      "destination": "/api/mcp?op=oauth-:step"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource/:path*",
+      "destination": "/api/mcp?op=oauth-resource"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server/:path*",
+      "destination": "/api/mcp?op=oauth-server"
     }
   ],
   "crons": [
@@ -36,6 +56,14 @@
     {
       "path": "/api/reading-synthesis",
       "schedule": "0 10 1 * *"
+    },
+    {
+      "path": "/api/likes?op=process",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/likes?op=digest",
+      "schedule": "0 12 1 * *"
     }
   ]
 }

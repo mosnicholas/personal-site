@@ -10,7 +10,7 @@
 
 import type { Sql } from './db.js';
 
-/** USD per million tokens */
+/** USD per million tokens, and per 1,000 web searches */
 export interface Price {
   input: number;
   output: number;
@@ -19,6 +19,8 @@ export interface Price {
   /** Cache writes with the 1-hour lifetime */
   cacheWrite1h: number;
   cacheRead: number;
+  /** Web searches, per 1,000 */
+  webSearch: number;
 }
 
 export interface PriceRow extends Price {
@@ -43,6 +45,7 @@ export const SEED_PRICES: PriceRow[] = [
     cacheWrite5m: 5,
     cacheWrite1h: 8,
     cacheRead: 0.2,
+    webSearch: 10,
   },
   {
     model: 'claude-sonnet-5-5',
@@ -52,6 +55,7 @@ export const SEED_PRICES: PriceRow[] = [
     cacheWrite5m: 2.5,
     cacheWrite1h: 4,
     cacheRead: 0.2,
+    webSearch: 10,
   },
   {
     model: 'claude-haiku-4-5',
@@ -61,6 +65,7 @@ export const SEED_PRICES: PriceRow[] = [
     cacheWrite5m: 1.25,
     cacheWrite1h: 2,
     cacheRead: 0.1,
+    webSearch: 10,
   },
 ];
 
@@ -98,7 +103,7 @@ export async function loadPrices(sql: Sql): Promise<PriceRow[]> {
   if (!cache || Date.now() - cache.at > CACHE_MS) {
     const rows = await sql`
       SELECT model, effective_from::text AS effective_from, input, output,
-        cache_write_5m, cache_write_1h, cache_read
+        cache_write_5m, cache_write_1h, cache_read, web_search
       FROM model_prices`;
     cache = {
       rows: rows.map((row) => ({
@@ -109,6 +114,7 @@ export async function loadPrices(sql: Sql): Promise<PriceRow[]> {
         cacheWrite5m: Number(row.cache_write_5m),
         cacheWrite1h: Number(row.cache_write_1h),
         cacheRead: Number(row.cache_read),
+        webSearch: Number(row.web_search),
       })),
       at: Date.now(),
     };
@@ -131,6 +137,7 @@ export interface Usage {
     ephemeral_5m_input_tokens?: number | null;
     ephemeral_1h_input_tokens?: number | null;
   } | null;
+  server_tool_use?: { web_search_requests?: number | null } | null;
 }
 
 export interface TokenUsage {
@@ -145,9 +152,9 @@ export interface TokenUsage {
 /**
  * Token counts and cost for a response, priced with `price` (from priceAt,
  * for the model that answered, which can differ from the one asked for when
- * a fallback ran). Input, cache writes, cache reads, and output each have
- * their own rate. Standard rates only: this site doesn't use batch, fast
- * mode, or US-only inference, which change them.
+ * a fallback ran). Input, cache writes, cache reads, output, and web
+ * searches each have their own rate. Standard rates only: this site
+ * doesn't use batch, fast mode, or US-only inference, which change them.
  */
 export function tokenUsage(usage: Usage, price: Price | undefined): TokenUsage {
   const inputTokens = usage.input_tokens ?? 0;
@@ -164,7 +171,9 @@ export function tokenUsage(usage: Usage, price: Price | undefined): TokenUsage {
         writes1h * price.cacheWrite1h +
         cacheReadInputTokens * price.cacheRead +
         outputTokens * price.output) /
-      1_000_000
+        1_000_000 +
+      ((usage.server_tool_use?.web_search_requests ?? 0) * price.webSearch) /
+        1_000
     : undefined;
 
   return {

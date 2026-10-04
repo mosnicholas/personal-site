@@ -26,6 +26,11 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - `/api/weekly-summary` - weekly cron that emails a Claude Opus 5.5 summary of my reading
 - `/api/reading-synthesis` - monthly cron (or a one-off over any window) that emails a Claude Opus 5.5 synthesis of everything I saved: themes, how my reading changed, and its own observations
 
+### Likes
+- `/likes` - a private collection of links, notes and photos I like, each organized by Claude Haiku 4.5 (which searches the web to identify products and places)
+- `/api/mcp` - an MCP server, so Claude or ChatGPT can save likes and search and read my likes and reading
+- A monthly email of a few things I liked a while back
+
 ## Tech Stack
 
 - **React 19** - UI

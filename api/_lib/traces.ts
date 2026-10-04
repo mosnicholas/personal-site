@@ -18,7 +18,9 @@ export type TraceKind =
   | 'tag_glossary'
   | 'tag_brief'
   | 'weekly_summary'
-  | 'reading_synthesis';
+  | 'reading_synthesis'
+  | 'likes_enrichment'
+  | 'likes_import';
 
 export interface Trace {
   kind: TraceKind;
