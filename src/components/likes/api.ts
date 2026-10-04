@@ -35,8 +35,7 @@ export const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong';
 
 /** The like's photo, or its page's preview image */
-export const likeImage = (like: Like) =>
-  like.hasPhoto ? `/api/likes?op=photo&id=${like.id}` : like.imageUrl;
+export const likeImage = (like: Like) => like.photoUrl ?? like.imageUrl;
 
 export const savedDate = (like: Like) =>
   new Date(like.createdAt).toLocaleDateString(undefined, {
@@ -44,3 +43,24 @@ export const savedDate = (like: Like) =>
     day: 'numeric',
     year: 'numeric',
   });
+
+/**
+ * Photos go up as JPEGs at most 2048px on the long side: small enough for
+ * Vercel's 4.5 MB request limit, and plenty for Haiku to read
+ */
+export async function resizePhoto(file: File): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (blob) =>
+        blob ? resolve(blob) : reject(new Error('Couldn’t read that photo')),
+      'image/jpeg',
+      0.85,
+    ),
+  );
+}

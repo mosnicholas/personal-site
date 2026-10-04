@@ -6,7 +6,8 @@ export interface Like {
   text: string;
   /** Why I like it */
   note: string;
-  hasPhoto: boolean;
+  /** Where /likes loads the photo from; it changes when the photo does */
+  photoUrl: string | null;
   /** Filled in by enrichment unless I set them first */
   title: string;
   description: string;

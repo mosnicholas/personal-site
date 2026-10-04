@@ -64,7 +64,7 @@ personal-site/
 │       ├── likes.ts           # The `likes` table and photos in Blob: list, search, save, edit, claim for enrichment
 │       ├── likes-enrich.ts    # Haiku fills in title/description/category/tags (web search for photos and notes); splits pasted notes
 │       ├── owner-auth.ts      # Owner key: session cookie, bearer, and a stateless OAuth server for MCP clients
-│       ├── mcp.ts             # Minimal MCP server (save, search, get) over likes and reading, no SDK
+│       ├── mcp.ts             # Minimal MCP server (save, update, search, get) over likes and reading, no SDK
 │       ├── likes-digest.ts    # Monthly email of a few old likes
 │       ├── graph.ts           # Queries behind /api/reading-graph
 │       ├── pricing.ts         # Dated model prices (`model_prices`), price lookup, the cost of a call from its usage
@@ -118,7 +118,8 @@ personal-site/
 ### Likes (`/likes`)
 - For nimo alone: keep it simple. No multi-user machinery, idempotency keys, delivery leases, export, or "untrusted input" prompt rules
 - One table, `likes` (created in `db.ts`); a photo is a private Vercel Blob (JPEG, resized to 2048px in the browser to stay under Vercel's 4.5 MB request limit) streamed back through `?op=photo`
-- Saving answers right away; enrichment runs after the response (`waitUntil`) and daily at 11am UTC for leftovers. Haiku 4.5 gets the link's fetched page (og: title, description, image, text), the text and note, and the photo, may run up to 10 web searches (resuming paused turns, 6 requests at most; thinking off), and finishes with a strict `save_details` tool call. Sources are only kept if they were real search results. Enrichment fills only empty fields, so anything I set (or Claude set over MCP) stays. Failures retry after 5 minutes, 3 tries, then show a Retry button
+- Saving answers right away; enrichment runs after the response (`waitUntil`) and daily at 11am UTC for leftovers. Haiku 4.5 gets the link's fetched page (og: title, description, image, text), the text and note, and the photo, may run up to 10 web searches (resuming paused turns, 6 requests at most; thinking off), and finishes with a strict `save_details` tool call. Sources are only kept if they were real search results, and `<cite>` markup Haiku copies from search results is stripped. The image is the linked page's og:image, else the first source page's. Enrichment fills only empty fields, so anything I set (or Claude set over MCP) stays; a like saved with title, description, category and tags already filled skips Haiku and only gets its image. Failures retry after 5 minutes, 3 tries
+- "Organize again" (`?op=redo`, or `update` with `reorganize` over MCP) clears what Haiku wrote and runs it again from the note and photo, e.g. to point it at one variant of a product page. A photo can be added or replaced later (`?op=photo`, POST); photo URLs carry a version (`v`) so browsers can cache them
 - Saving a link that's already saved returns the existing like
 - Pasted notes are split by Haiku (structured output) in ~8k-character pieces; a piece that fails is saved whole
 - Auth (`owner-auth.ts`, shared with the MCP server): `PERSONAL_SITE_OWNER_KEY` signs in on the page (30-day HttpOnly cookie), works as a bearer token, and signs OAuth codes and tokens (HMAC, purpose-bound, no tables). Changing the key signs everything out
@@ -127,7 +128,7 @@ personal-site/
 ### MCP server (`/api/mcp`)
 - For Claude and ChatGPT connectors: OAuth discovery (`/.well-known/...`), dynamic registration (anyone may register; I approve by typing the key on the consent page), PKCE, 1-day access and 90-day refresh tokens, all stateless signed tokens
 - Hand-written JSON-RPC (stateless, JSON responses, no SSE), not the MCP SDK (~100 dependencies). Tools are entries in `TOOLS`; add a source by adding tools or results there
-- Three tools: `save` (a like; `photo` is a ChatGPT file param, `_meta["openai/fileParams"]`, or any public image URL, fetched and resized to JPEG by Blob `putImage`, which needs Vercel's OIDC), `search` (likes and saved reading, every word must match, `source` and `since` filters), `get` (a like with its photo as an image, or a saved document with its summary and up to 100k chars of text). Feed items aren't included. Claude can't pass chat images to tools, so photos from Claude only work as URLs
+- Four tools: `save` (a like, with title, description, category and tags when the client already knows them; `photo` is a ChatGPT file param, `_meta["openai/fileParams"]`, or any public image URL, fetched and resized to JPEG by Blob `putImage`, which needs Vercel's OIDC), `update` (a like's fields or photo; `reorganize` reruns enrichment, keeping what the call sets), `search` (likes and saved reading, every word must match, `source` and `since` filters), `get` (a like with its photo as an image, or a saved document with its summary and up to 100k chars of text). Feed items aren't included. Claude can't pass chat images to tools, so photos from Claude only work as URLs
 
 ### LLM traces
 - Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `document_summary`, `rebalance`, `tag_glossary`, `tag_brief`, `weekly_summary`, `reading_synthesis`, `likes_enrichment`, `likes_import`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`

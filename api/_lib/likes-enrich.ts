@@ -28,7 +28,7 @@ const MODEL = 'claude-haiku-4-5';
 
 const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. For each save, work out what it is and fill in the details that will let them recognize it at a glance and find it later.
 
-When a save points at something specific, like a product in a photo or a place or book named in a note, search the web to identify it exactly. Reuse one of the collection's categories when one fits. Then call save_details.`;
+When a save points at something specific, like a product in a photo or a place or book named in a note, search the web to identify it exactly. Their text, note and photo show what caught their eye: when they single out one version of something, like a color, a material, or one of several models on a page, describe that version. Reuse one of the collection's categories when one fits. Then call save_details.`;
 
 const WEB_SEARCH: Anthropic.WebSearchTool20250305 = {
   type: 'web_search_20250305',
@@ -134,6 +134,10 @@ async function fetchPage(url: string): Promise<Page | undefined> {
   }
 }
 
+// After searching, Haiku sometimes copies the citation markup it reads
+// (`<cite index="1-6">`) into what it writes
+const plain = (text: string) => text.replace(/<\/?cite\b[^>]*>/g, '').trim();
+
 /** The request without the photo's bytes, which don't belong in the trace log */
 const withoutPhoto = (request: Anthropic.MessageCreateParamsNonStreaming) => ({
   ...request,
@@ -226,8 +230,10 @@ async function askForDetails(like: Like, page?: Page, photo?: Buffer) {
     }
     if (details) {
       return {
-        ...details,
-        tags: [...new Set(details.tags.map((tag) => tag.toLowerCase()))],
+        title: plain(details.title),
+        description: plain(details.description),
+        category: plain(details.category),
+        tags: [...new Set(details.tags.map((tag) => plain(tag).toLowerCase()))],
         sources: details.sources
           .filter((url) => results.has(url))
           .map((url) => ({ url, title: results.get(url)! })),
@@ -246,12 +252,20 @@ async function askForDetails(like: Like, page?: Page, photo?: Buffer) {
 async function enrichLike(like: Like): Promise<void> {
   try {
     const page = like.url ? await fetchPage(like.url) : undefined;
-    const photo = like.hasPhoto ? await photoBytes(like.id) : undefined;
-    const details = await askForDetails(like, page, photo);
-    await finishLike(like.id, {
-      ...details,
-      imageUrl: page?.imageUrl ?? null,
-    });
+    const photo = like.photoUrl ? await photoBytes(like.id) : undefined;
+    // Saved with everything filled in (Claude often knows what it is), so
+    // only the preview image is missing
+    const complete =
+      like.title && like.description && like.category && like.tags.length;
+    const details = complete
+      ? { ...like, category: like.category!, sources: [] }
+      : await askForDetails(like, page, photo);
+    // The linked page's image, else the first source page that has one
+    let imageUrl = page?.imageUrl ?? null;
+    for (const source of details.sources.slice(0, 3)) {
+      imageUrl ??= (await fetchPage(source.url))?.imageUrl ?? null;
+    }
+    await finishLike(like.id, { ...details, imageUrl });
   } catch (error) {
     console.error(`Could not enrich like ${like.id}:`, error);
     await failLike(

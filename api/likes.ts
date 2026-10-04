@@ -12,7 +12,8 @@ import {
   LikeInputError,
   listLikes,
   readPhoto,
-  retryLike,
+  redoLike,
+  replacePhoto,
   saveLike,
   updateLike,
 } from './_lib/likes.js';
@@ -25,7 +26,9 @@ import {
  * - GET: every like, newest first; `?op=photo&id=` a like's photo
  * - POST: save a like, JSON `{ url, text, note }`, or a form that adds a `photo`
  * - POST `?op=import` `{ text }`: split pasted notes into likes
- * - PATCH `?id=` (a LikePatch), DELETE `?id=`, POST `?op=retry&id=`
+ * - PATCH `?id=` (a LikePatch), DELETE `?id=`
+ * - POST `?op=redo&id=`: organize a like again, from my note and photo
+ * - POST `?op=photo&id=` (a form with `photo`): add or replace its photo
  * - POST `?op=login` `{ key }`, POST `?op=logout`
  * - Crons: `?op=process` (daily) enriches likes left waiting; `?op=digest`
  *   (monthly) emails a few old ones
@@ -64,6 +67,20 @@ async function handle(request: Request): Promise<Response> {
 
   switch (op) {
     case 'photo': {
+      if (method === 'POST') {
+        const photo = (await request.formData()).get('photo');
+        if (!(photo instanceof File)) {
+          throw new LikeInputError('Choose a photo');
+        }
+        const like = await replacePhoto(
+          id,
+          new Uint8Array(await photo.arrayBuffer()),
+        );
+        return like
+          ? Response.json({ like })
+          : Response.json({ error: 'Not found' }, { status: 404 });
+      }
+      // The URL changes with the photo (`v`), so browsers can keep it
       const photo = await readPhoto(id);
       return photo
         ? new Response(photo.stream, {
@@ -80,8 +97,8 @@ async function handle(request: Request): Promise<Response> {
       processLikesLater();
       return Response.json({ likes });
     }
-    case 'retry': {
-      const like = await retryLike(id);
+    case 'redo': {
+      const like = await redoLike(id);
       processLikesLater();
       return like
         ? Response.json({ like })

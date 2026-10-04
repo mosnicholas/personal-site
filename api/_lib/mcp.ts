@@ -15,8 +15,11 @@ import {
   getLike,
   LikeInputError,
   photoBytes,
+  redoLike,
+  replacePhoto,
   saveLike,
   searchLikes,
+  updateLike,
 } from './likes.js';
 
 const INSTRUCTIONS = `This is nimo's (Nicholas Moschopoulos's) own data. Likes are things he saved because he likes them: products, places, links, ideas, often with a note on why. Reading is what he saved to Readwise Reader, each with a summary and usually the full text. Search to find things, then get one for all of it.`;
@@ -65,54 +68,120 @@ const likeResult = (like: Like, site: string) => ({
   description: like.description,
   category: like.category,
   tags: like.tags,
-  hasPhoto: like.hasPhoto,
+  hasPhoto: Boolean(like.photoUrl),
   status: like.status,
   saved: like.createdAt.slice(0, 10),
   link: `${site}/likes?item=${like.id}`,
 });
 
+// ChatGPT passes photos attached in the chat to parameters listed in
+// _meta["openai/fileParams"], as objects of this shape
+const PHOTO_PARAMETER = {
+  type: 'object',
+  description:
+    'A photo of it: in ChatGPT, the image attached in the chat. Elsewhere, a public image URL as download_url (file_id can be empty)',
+  properties: {
+    download_url: { type: 'string' },
+    file_id: { type: 'string' },
+    mime_type: { type: 'string' },
+    file_name: { type: 'string' },
+  },
+  required: ['download_url', 'file_id'],
+};
+
+const photoUrl = (photo: unknown) => {
+  const url = str(
+    (photo as { download_url?: unknown } | undefined)?.download_url,
+  );
+  return url ? new URL(url) : undefined;
+};
+
 const TOOLS: Tool[] = [
   {
     name: 'save',
     description:
-      'Save something nimo likes: a link, a note, a photo, or a mix. Its title, description, category and tags are filled in within a minute.',
+      'Save something nimo likes: a link, a note, a photo, or a mix. Give it a title, description, category and tags if you know what it is; whatever you leave out is filled in within a minute by a quick lookup.',
     inputSchema: {
       type: 'object',
       properties: {
         url: { type: 'string', description: 'The link, if there is one' },
         text: { type: 'string', description: 'What it is' },
         note: { type: 'string', description: 'Why he likes it, if he said' },
-        photo: {
-          type: 'object',
+        photo: PHOTO_PARAMETER,
+        title: {
+          type: 'string',
           description:
-            'A photo of it: in ChatGPT, the image attached in the chat. Elsewhere, a public image URL as download_url (file_id can be empty)',
-          properties: {
-            download_url: { type: 'string' },
-            file_id: { type: 'string' },
-            mime_type: { type: 'string' },
-            file_name: { type: 'string' },
-          },
-          required: ['download_url', 'file_id'],
+            'What it is, specific enough to recognize: brand and model for a product',
         },
+        description: { type: 'string', description: 'A sentence or two' },
+        category: {
+          type: 'string',
+          description:
+            'One broad category; search likes to see the ones in use',
+        },
+        tags: { type: 'array', items: { type: 'string' } },
       },
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false },
-    // ChatGPT passes photos attached in the chat to this parameter
     _meta: { 'openai/fileParams': ['photo'] },
     async run(args, site) {
-      const photoUrl = str(
-        (args.photo as { download_url?: unknown } | undefined)?.download_url,
-      );
       const like = await saveLike({
         url: str(args.url),
         text: str(args.text),
         note: str(args.note),
-        photo: photoUrl ? new URL(photoUrl) : undefined,
+        photo: photoUrl(args.photo),
+        title: str(args.title),
+        description: str(args.description),
+        category: str(args.category),
+        tags: Array.isArray(args.tags) ? args.tags.map(String) : undefined,
         source: 'mcp',
       });
       processLikesLater();
       return asJson(likeResult(like, site));
+    },
+  },
+  {
+    name: 'update',
+    description:
+      'Change a like: its note, title, description, category, tags or photo. Set reorganize to have its details written again from the note and photo, for instance after he says which version of something he means.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        note: { type: 'string', description: 'Replaces the note' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        category: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        photo: PHOTO_PARAMETER,
+        reorganize: {
+          type: 'boolean',
+          description:
+            'Write the title, description, category and tags again, keeping any set in this call',
+        },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+    _meta: { 'openai/fileParams': ['photo'] },
+    async run(args, site) {
+      const id = str(args.id) ?? '';
+      if (!(await getLike(id))) throw new ToolError(`No like has the id ${id}`);
+      const photo = photoUrl(args.photo);
+      if (photo) await replacePhoto(id, photo);
+      // Cleared first, so what this call sets survives the rewrite
+      if (args.reorganize === true) await redoLike(id);
+      const like = await updateLike(id, {
+        note: str(args.note),
+        title: str(args.title),
+        description: str(args.description),
+        category: str(args.category),
+        tags: Array.isArray(args.tags) ? args.tags.map(String) : undefined,
+      });
+      if (args.reorganize === true) processLikesLater();
+      return asJson(likeResult(like!, site));
     },
   },
   {
@@ -175,7 +244,7 @@ const TOOLS: Tool[] = [
       const id = str(args.id) ?? '';
       const like = await getLike(id);
       if (like) {
-        const photo = like.hasPhoto ? await photoBytes(like.id) : undefined;
+        const photo = like.photoUrl ? await photoBytes(like.id) : undefined;
         return [
           ...asJson({ source: 'likes', ...likeResult(like, site) }),
           ...(photo

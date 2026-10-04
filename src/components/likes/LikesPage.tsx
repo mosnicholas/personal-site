@@ -1,30 +1,17 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 
 import { likeTitle, type Like } from '../../../shared/likes';
-import { api, ApiError, errorMessage, json, likeImage, savedDate } from './api';
+import {
+  api,
+  ApiError,
+  errorMessage,
+  json,
+  likeImage,
+  resizePhoto,
+  savedDate,
+} from './api';
 import LikeDetail from './LikeDetail';
 import './likes.css';
-
-/**
- * Photos go up as JPEGs at most 2048px on the long side: small enough for
- * Vercel's 4.5 MB request limit, and plenty for Haiku to read
- */
-async function resizePhoto(file: File): Promise<Blob> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve, reject) =>
-    canvas.toBlob(
-      (blob) =>
-        blob ? resolve(blob) : reject(new Error('Couldn’t read that photo')),
-      'image/jpeg',
-      0.85,
-    ),
-  );
-}
 
 const matches = (like: Like, query: string) => {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);

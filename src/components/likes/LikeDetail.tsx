@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 
 import type { Like, LikePatch } from '../../../shared/likes';
-import { api, errorMessage, json, likeImage, savedDate } from './api';
+import {
+  api,
+  errorMessage,
+  json,
+  likeImage,
+  resizePhoto,
+  savedDate,
+} from './api';
 
 interface Draft {
   title: string;
@@ -73,8 +80,22 @@ const LikeDetail = ({
     return patch;
   };
 
+  // Saves my note first: it's what steers Haiku toward the version I like
+  const organizeAgain = async () => {
+    if (draft.note !== like.note) {
+      await api(`?id=${like.id}`, json('PATCH', { note: draft.note }));
+    }
+    await api(`?op=redo&id=${like.id}`, { method: 'POST' });
+  };
+
+  const uploadPhoto = async (file: File) => {
+    const body = new FormData();
+    body.set('photo', await resizePhoto(file), 'photo.jpg');
+    await api(`?op=photo&id=${like.id}`, { method: 'POST', body });
+  };
+
   const field = (name: keyof Draft, label: string, rows = 0) => (
-    <label>
+    <label className="likes-field">
       {label}
       {rows ? (
         <textarea
@@ -175,19 +196,26 @@ const LikeDetail = ({
           >
             Save
           </button>
-          {like.status !== 'ready' && (
-            <button
+          <button
+            disabled={busy}
+            onClick={() => void run(organizeAgain)}
+            title="Rewrites the title, description, category and tags, going by your note and photo"
+            type="button"
+          >
+            {like.status === 'ready' ? 'Organize again' : 'Retry'}
+          </button>
+          <label className="likes-button">
+            {like.photoUrl ? 'Change photo' : 'Add photo'}
+            <input
+              accept="image/*"
               disabled={busy}
-              onClick={() =>
-                void run(() =>
-                  api(`?op=retry&id=${like.id}`, { method: 'POST' }),
-                )
-              }
-              type="button"
-            >
-              Retry
-            </button>
-          )}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void run(() => uploadPhoto(file));
+              }}
+              type="file"
+            />
+          </label>
           <button
             disabled={busy}
             onClick={() => {

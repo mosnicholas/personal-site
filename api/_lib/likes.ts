@@ -5,7 +5,7 @@
  * background (likes-enrich.ts), leaving alone anything I set myself.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { del, get, put, putImage } from '@vercel/blob';
 
@@ -19,9 +19,14 @@ export interface NewLike {
   url?: string;
   text?: string;
   note?: string;
-  /** Set by me (or Claude, saving over MCP); enrichment keeps them */
+  /**
+   * Set by whoever saves it (Claude often knows what it is already);
+   * enrichment only fills in what's missing
+   */
   title?: string;
+  description?: string;
   category?: string;
+  tags?: string[];
   /**
    * A JPEG resized in the browser before upload, or the URL of an image
    * (ChatGPT passes the photos attached in a chat as temporary URLs)
@@ -49,7 +54,9 @@ export function likeFromRow(row: Row): Like {
     url: (row.url as string | null) ?? null,
     text: String(row.text),
     note: String(row.note),
-    hasPhoto: Boolean(row.photo),
+    photoUrl: row.photo
+      ? `/api/likes?op=photo&id=${String(row.id)}&v=${createHash('sha256').update(String(row.photo)).digest('hex').slice(0, 8)}`
+      : null,
     title: String(row.title),
     description: String(row.description),
     category: (row.category as string | null) ?? null,
@@ -130,11 +137,16 @@ export async function saveLike(like: NewLike): Promise<Like> {
     if (existing) return likeFromRow(existing);
   }
   const id = randomUUID();
-  const photo = like.photo ? await savePhoto(id, like.photo) : null;
+  const photo = like.photo
+    ? await savePhoto(`likes/${id}.jpg`, like.photo)
+    : null;
   const [row] = await sql`
-    INSERT INTO likes (id, url, text, note, photo, title, category, source)
+    INSERT INTO likes (id, url, text, note, photo, title, description,
+      category, tags, source)
     VALUES (${id}, ${url}, ${text}, ${like.note?.trim() ?? ''}, ${photo},
-      ${like.title?.trim() ?? ''}, ${like.category?.trim() || null},
+      ${like.title?.trim() ?? ''}, ${like.description?.trim() ?? ''},
+      ${like.category?.trim() || null},
+      ${(like.tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean)},
       ${like.source})
     RETURNING *`;
   return likeFromRow(row);
@@ -145,8 +157,7 @@ export async function saveLike(like: NewLike): Promise<Like> {
  * fetched and resized by Vercel Image Optimization, which needs the OIDC
  * credentials Vercel provides (so it doesn't work locally)
  */
-async function savePhoto(id: string, photo: Uint8Array | URL) {
-  const pathname = `likes/${id}.jpg`;
+async function savePhoto(pathname: string, photo: Uint8Array | URL) {
   if (!(photo instanceof URL)) {
     const blob = await put(pathname, Buffer.from(photo), {
       access: 'private',
@@ -197,15 +208,36 @@ export async function deleteLike(id: string): Promise<boolean> {
   return Boolean(row);
 }
 
-/** Queues a like for enrichment again, with a fresh set of attempts */
-export async function retryLike(id: string): Promise<Like | undefined> {
+/**
+ * Queues a like to be organized again from scratch, with a fresh set of
+ * attempts: what Haiku filled in is cleared, so it goes by my note and photo
+ * as they are now
+ */
+export async function redoLike(id: string): Promise<Like | undefined> {
   const sql = await requireSql();
   const [row] = await sql`
-    UPDATE likes SET status = 'pending', error = NULL, attempts = 0,
-      claimed_at = NULL
+    UPDATE likes SET title = '', description = '', category = NULL,
+      tags = '{}', image_url = NULL, sources = '[]', status = 'pending',
+      error = NULL, attempts = 0, claimed_at = NULL
     WHERE id = ${id}
     RETURNING *`;
   return row ? likeFromRow(row) : undefined;
+}
+
+/** Adds or replaces a like's photo (see savePhoto) */
+export async function replacePhoto(
+  id: string,
+  photo: Uint8Array | URL,
+): Promise<Like | undefined> {
+  const sql = await requireSql();
+  const [old] = await sql`SELECT photo FROM likes WHERE id = ${id}`;
+  if (!old) return undefined;
+  // A new path each time, so nothing serves the old photo from a cache
+  const url = await savePhoto(`likes/${id}-${Date.now()}.jpg`, photo);
+  const [row] = await sql`
+    UPDATE likes SET photo = ${url} WHERE id = ${id} RETURNING *`;
+  if (old.photo) await del(String(old.photo));
+  return likeFromRow(row);
 }
 
 /** A like's photo, streamed from Blob storage */

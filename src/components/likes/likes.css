@@ -109,8 +109,20 @@
   cursor: pointer;
 }
 
-.likes-file input {
+.likes-file input,
+.likes-button input {
   display: none;
+}
+
+.likes-page .likes-button {
+  border: 1px solid #5b5b56;
+  border-radius: 3px;
+  padding: 9px 13px;
+  cursor: pointer;
+}
+
+.likes-page .likes-button:hover {
+  border-color: var(--likes-ink);
 }
 
 .likes-capture .likes-error {
@@ -283,15 +295,15 @@
   text-underline-offset: 3px;
 }
 
-.likes-detail label {
+.likes-field {
   display: block;
   margin-top: 16px;
   color: var(--likes-soft);
   font-size: 0.72rem;
 }
 
-.likes-detail label input,
-.likes-detail label textarea {
+.likes-field input,
+.likes-field textarea {
   display: block;
   width: 100%;
   margin-top: 6px;
@@ -305,6 +317,7 @@
 
 .likes-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 24px;
 }

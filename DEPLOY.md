@@ -111,7 +111,7 @@ ORDER BY r.created_at, title;
 1. Set `PERSONAL_SITE_OWNER_KEY` (above). It's the password on `/likes`, and signs the tokens Claude uses; changing it signs everything out
 2. Vercel → Storage → Create → Blob, with **private** access, connected to the project. On Vercel it authenticates with the project's OIDC token; `BLOB_READ_WRITE_TOKEN` is only needed to run it locally
 3. Redeploy, open `/likes` and sign in with the key
-4. Connect Claude: Settings → Connectors → Add custom connector → `https://nimo.fyi/api/mcp`, then type the key on the page it opens. Claude can then save likes, search likes and reading, and read any of them in full. Claude can't hand a chat's photo to a tool, so for a photo it saves a note describing it; upload the photo itself on `/likes`
+4. Connect Claude: Settings → Connectors → Add custom connector → `https://nimo.fyi/api/mcp`, then type the key on the page it opens. Claude can then save and update likes, search likes and reading, and read any of them in full. Claude can't hand a chat's photo to a tool, so for a photo it saves a note describing it; upload the photo itself on `/likes`
 5. Connect ChatGPT (needs developer mode: Settings → Apps & Connectors → Advanced): create a connector with the same URL and OAuth, then type the key. ChatGPT can pass photos attached in a chat, so "save this" with a photo stores the photo
 
 New likes are organized within a minute of saving; `/api/likes?op=process` (daily, 11am UTC) picks up anything left over, and `/api/likes?op=digest` (1st of the month, noon UTC) sends the email. Both take the cron secret:
