@@ -23,6 +23,12 @@ The MCP intentionally exposes four tools:
 
 Captures and imports continue automatically in bounded background batches, with the daily cron resuming unfinished work. Callers should report the returned queue status rather than requesting processing or retry operations. Structured-batch partial failures return the saved results and failing position.
 
+Saving and enhancement are separate confirmations. `save_like` returns the durable save, current status, a plain-language message, and a private review link. The client should check `get_like` before reporting that enhancement completed and show the resulting title/category/tags. If it is still processing, it should say so and provide the review link. The server cannot push a later notification into an inactive chat. The web collection updates the visible status as processing completes.
+
+Photos are classified from the uploaded image, visible label text, and your note; there is no product web search or reverse-image lookup. URLs supply fetched page text and OpenGraph/Product metadata. Inferred photo identities remain suggestions. Correct title, category, tags, brand, description, or your note in the private item page; corrected fields are retained during future enhancement attempts. Original photos and text are retained separately.
+
+Provider failures, timeouts, refusals, and invalid responses keep the original save. Enhancement retries up to three attempts, with a five-minute minimum delay and execution resumed by background processing, an open collection, or the daily cron. After the final failure the item exposes its error and a manual Retry action. A successful save is never reported as a failed capture merely because enrichment failed.
+
 ## Archives and exports
 
 Each link is fetched with public-address validation, DNS pinning, redirect checks, time/size limits, OpenGraph/Product metadata extraction, and a static HTML archive with embedded key images/CSS. Active scripts and remote subresources are removed. Original uploads, downloaded images, raw note text, parsed text, captures, and import sources are retained. Pages needing login, blocked requests, video, dynamic content, or missing resources may have a partial/failed archive; “complete” means the captured static version, not a working copy of the original application.

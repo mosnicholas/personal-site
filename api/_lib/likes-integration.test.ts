@@ -28,6 +28,7 @@ import {
   saveLike,
   savePhotoLike,
   startImport,
+  retryLike,
   updateLike,
   updateSettings,
   validateUpload,
@@ -52,6 +53,8 @@ const originalFetch = globalThis.fetch;
 let mailCalls = 0;
 let mailFails = false;
 let failFrontier = false;
+let frontierFailureGate: Promise<void> | undefined;
+let frontierFailureStarted: (() => void) | undefined;
 globalThis.fetch = async (input, init) => {
   const url =
     typeof input === 'string'
@@ -69,6 +72,8 @@ globalThis.fetch = async (input, init) => {
       typeof request.messages[0].content === 'string' &&
       request.messages[0].content.includes('Failed frontier')
     ) {
+      frontierFailureStarted?.();
+      await frontierFailureGate;
       return Response.json(
         {
           type: 'error',
@@ -94,6 +99,7 @@ globalThis.fetch = async (input, init) => {
           tags: ['woody'],
           title: 'A woody perfume',
           description: 'Label preserved',
+          brand: 'Model brand',
           identification: 'suggested',
           extractedText: 'TEST LABEL',
         };
@@ -460,6 +466,104 @@ test('failed processing batches do not leave healthy saves behind them untouched
   const rows =
     await sql`SELECT attempts FROM liked_items WHERE id=ANY(${failedIds})`;
   assert.ok(rows.every((row) => Number(row.attempts) === 1));
+});
+
+test('automatic retry clears the old enrichment error after recovery', async () => {
+  const originalText = 'Failed frontier automatic recovery';
+  const saved = await saveLike({ text: originalText });
+  const sql = await getLikesSql();
+  await sql`UPDATE liked_items SET status='ready' WHERE id<>${saved.item.id}`;
+  failFrontier = true;
+  try {
+    await processLikes({ limit: 1 });
+  } finally {
+    failFrontier = false;
+  }
+  const failedAttempt = (await getLike(saved.item.id))!;
+  assert.equal(failedAttempt.status, 'pending');
+  assert.match(failedAttempt.error ?? '', /Saved without enrichment/);
+  // Resume the scheduled job directly, without retryLike clearing its error.
+  await sql`UPDATE liked_items SET available_at=now() WHERE id=${saved.item.id}`;
+  await processLikes({ limit: 1 });
+  const recovered = (await getLike(saved.item.id))!;
+  assert.equal(recovered.status, 'ready');
+  assert.equal(recovered.error, null);
+  assert.equal(recovered.originalText, originalText);
+  const [row] =
+    await sql`SELECT attempts FROM liked_items WHERE id=${saved.item.id}`;
+  assert.equal(Number(row.attempts), 2);
+});
+
+test('manual brand and description survive a mid-flight failure, scheduled retries, and a retry', async () => {
+  const originalText = 'Failed frontier manual correction';
+  const saved = await saveLike({ text: originalText });
+  const sql = await getLikesSql();
+  await sql`UPDATE liked_items SET status='ready' WHERE id<>${saved.item.id}`;
+
+  let releaseFailure!: () => void;
+  frontierFailureGate = new Promise<void>((resolve) => {
+    releaseFailure = resolve;
+  });
+  const failureStarted = new Promise<void>((resolve) => {
+    frontierFailureStarted = resolve;
+  });
+  failFrontier = true;
+  try {
+    const firstAttempt = processLikes({ limit: 1 });
+    await failureStarted;
+    await updateLike(saved.item.id, {
+      brand: 'Manual brand',
+      description: 'Manual description',
+    });
+    releaseFailure();
+    await firstAttempt;
+    frontierFailureGate = undefined;
+    frontierFailureStarted = undefined;
+
+    const afterFirstFailure = (await getLike(saved.item.id))!;
+    assert.equal(afterFirstFailure.status, 'pending');
+    assert.equal(afterFirstFailure.brand, 'Manual brand');
+    assert.equal(afterFirstFailure.description, 'Manual description');
+    assert.equal(afterFirstFailure.originalText, originalText);
+    assert.match(afterFirstFailure.error ?? '', /Saved without enrichment/);
+
+    await sql`UPDATE liked_items SET available_at=now() WHERE id=${saved.item.id}`;
+    await processLikes({ limit: 1 });
+    assert.equal((await getLike(saved.item.id))!.status, 'pending');
+
+    await sql`UPDATE liked_items SET available_at=now() WHERE id=${saved.item.id}`;
+    await processLikes({ limit: 1 });
+    const terminalFailure = (await getLike(saved.item.id))!;
+    assert.equal(terminalFailure.status, 'failed');
+    assert.equal(terminalFailure.brand, 'Manual brand');
+    assert.equal(terminalFailure.description, 'Manual description');
+
+    const retried = await retryLike(saved.item.id);
+    assert.equal(retried.status, 'pending');
+    assert.equal(retried.error, null);
+  } finally {
+    releaseFailure?.();
+    frontierFailureGate = undefined;
+    frontierFailureStarted = undefined;
+    failFrontier = false;
+  }
+
+  await processLikes({ limit: 1 });
+  const recovered = (await getLike(saved.item.id))!;
+  assert.equal(recovered.status, 'ready');
+  assert.equal(recovered.brand, 'Manual brand');
+  assert.equal(recovered.description, 'Manual description');
+  assert.equal(recovered.originalText, originalText);
+
+  await updateLike(saved.item.id, { brand: null, description: '' });
+  await sql`UPDATE liked_items SET status='failed',error='A later attempt failed' WHERE id=${saved.item.id}`;
+  await retryLike(saved.item.id);
+  await processLikes({ limit: 1 });
+  const cleared = (await getLike(saved.item.id))!;
+  assert.equal(cleared.status, 'ready');
+  assert.equal(cleared.brand, null);
+  assert.equal(cleared.description, '');
+  assert.equal(cleared.originalText, originalText);
 });
 
 test('digest opt-in, failures, retries, and successful weekly idempotency', async () => {

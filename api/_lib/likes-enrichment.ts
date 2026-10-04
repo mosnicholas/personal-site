@@ -142,7 +142,7 @@ function mergePatch(
               : classification.identification,
         }
       : { identification: 'unknown' as const }),
-    ...(error ? { error } : {}),
+    error: error ?? null,
     ...(failed ? { status: 'failed' as const } : {}),
   };
 }
@@ -205,6 +205,7 @@ async function enrichPhoto(item: LikedItem): Promise<Partial<LikedItem>> {
       return {
         identification: 'unknown',
         error: 'The original photo is not a supported size for identification.',
+        status: 'failed',
       };
     }
     const request: Anthropic.MessageCreateParamsNonStreaming = {

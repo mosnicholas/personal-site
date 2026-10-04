@@ -37,7 +37,8 @@ interface LikeSelection {
   item: LikedItem;
 }
 
-type DetailField = 'title' | 'note' | 'category' | 'tags';
+type DetailField =
+  'title' | 'note' | 'category' | 'tags' | 'brand' | 'description';
 type DetailDraft = Partial<Record<DetailField, string>>;
 
 const pendingStatuses = new Set(['pending', 'processing']);
@@ -89,6 +90,16 @@ const primaryImage = (item: LikedItem) =>
   );
 
 const isPending = (item: LikedItem) => pendingStatuses.has(item.status);
+
+const enrichmentStatus = (item: LikedItem) => {
+  if (item.status === 'pending') return 'Saved — organizing…';
+  if (item.status === 'processing') return 'Organizing…';
+  if (item.status === 'failed') return 'Could not finish organizing';
+  if (item.identification === 'confirmed') return 'Enhanced — identified';
+  if (item.identification === 'suggested')
+    return 'Enhanced — suggested identification';
+  return item.kind === 'photo' ? 'Organized — could not identify' : 'Enhanced';
+};
 
 const captureFromQuery = (): CaptureDraft => {
   const search = new URLSearchParams(window.location.search);
@@ -574,11 +585,14 @@ const LikesPage = () => {
         return;
       }
       if (!response.ok) throw new Error(await apiError(response));
+      const saved = (await response.json()) as { duplicate: boolean };
       setCapture({ url: '', text: '', note: '' });
       setCaptureFiles([]);
       captureRequestKey.current = null;
       uploadedAttachmentIds.current = [];
-      setNotice('Saved.');
+      setNotice(
+        saved.duplicate ? 'Already saved.' : 'Saved. Your original is stored.',
+      );
       processStarted.current = false;
       setReportedPending(1);
       setProcessCycle((current) => current + 1);
@@ -634,7 +648,14 @@ const LikesPage = () => {
     patch: Partial<
       Pick<
         LikedItem,
-        'title' | 'note' | 'category' | 'tags' | 'snoozedUntil' | 'dismissed'
+        | 'title'
+        | 'note'
+        | 'category'
+        | 'tags'
+        | 'brand'
+        | 'description'
+        | 'snoozedUntil'
+        | 'dismissed'
       >
     >,
   ) => {
@@ -674,6 +695,10 @@ const LikesPage = () => {
       return;
     }
     if (!response.ok) throw new Error(await apiError(response));
+    const data = (await response.json()) as { item: LikedItem };
+    setSelection((current) =>
+      current?.id === item.id ? { id: data.item.id, item: data.item } : current,
+    );
     processStarted.current = false;
     setReportedPending(1);
     setProcessCycle((current) => current + 1);
@@ -954,7 +979,11 @@ const LikesPage = () => {
             )}
           </section>
           {processError && <p className="likes-error">{processError}</p>}
-          {notice && !processError && <p className="likes-notice">{notice}</p>}
+          {notice && !processError && (
+            <p className="likes-notice" role="status">
+              {notice}
+            </p>
+          )}
 
           {items.length ? (
             <section className="likes-grid" aria-label="Your likes">
@@ -988,11 +1017,11 @@ const LikesPage = () => {
                           <span key={tag}>{tag}</span>
                         ))}
                       </div>
-                      {item.status === 'failed' && (
-                        <span className="likes-card-status">
-                          Needs another try
-                        </span>
-                      )}
+                      <span
+                        className={`likes-card-status likes-card-status-${item.status}`}
+                      >
+                        {enrichmentStatus(item)}
+                      </span>
                     </div>
                   </button>
                 );
@@ -1096,7 +1125,14 @@ const LikeDetail = ({
     patch: Partial<
       Pick<
         LikedItem,
-        'title' | 'note' | 'category' | 'tags' | 'snoozedUntil' | 'dismissed'
+        | 'title'
+        | 'note'
+        | 'category'
+        | 'tags'
+        | 'brand'
+        | 'description'
+        | 'snoozedUntil'
+        | 'dismissed'
       >
     >,
   ) => Promise<void>;
@@ -1110,6 +1146,8 @@ const LikeDetail = ({
   const note = draft.note ?? item.note;
   const category = draft.category ?? item.category;
   const tags = draft.tags ?? item.tags.join(', ');
+  const brand = draft.brand ?? item.brand ?? '';
+  const description = draft.description ?? item.description;
   const dirtyFields = Object.keys(draft) as DetailField[];
   const updateDraft = (field: DetailField, value: string) =>
     setDraft((current) => ({ ...current, [field]: value }));
@@ -1120,12 +1158,19 @@ const LikeDetail = ({
     setError('');
     const submitted = { ...draft };
     const patch: Partial<
-      Pick<LikedItem, 'title' | 'note' | 'category' | 'tags'>
+      Pick<
+        LikedItem,
+        'title' | 'note' | 'category' | 'tags' | 'brand' | 'description'
+      >
     > = {};
     if (submitted.title !== undefined) patch.title = submitted.title;
     if (submitted.note !== undefined) patch.note = submitted.note;
     if (submitted.category !== undefined) patch.category = submitted.category;
     if (submitted.tags !== undefined) patch.tags = splitTags(submitted.tags);
+    if (submitted.brand !== undefined)
+      patch.brand = submitted.brand.trim() || null;
+    if (submitted.description !== undefined)
+      patch.description = submitted.description;
     try {
       await onPatch(item, patch);
       setDraft((current) => {
@@ -1192,6 +1237,25 @@ const LikeDetail = ({
         <p className="likes-card-meta">
           {item.kind} · saved {displayDate(item.createdAt)}
         </p>
+        <p
+          className={`likes-item-status likes-item-status-${item.status}`}
+          role="status"
+        >
+          {enrichmentStatus(item)}
+          {item.status === 'pending' && item.error
+            ? ` Last attempt: ${item.error} Retrying automatically.`
+            : ''}
+          {item.status === 'failed'
+            ? ` ${item.error ?? 'Your original is still saved.'} Retry to try again.`
+            : ''}
+          {item.status === 'ready' && item.error ? ` ${item.error}` : ''}
+        </p>
+        {item.kind === 'photo' && item.identification === 'suggested' && (
+          <p className="likes-identification-caution">
+            This is a suggestion from the photo. Confirm it before relying on
+            it.
+          </p>
+        )}
         <label>
           Title
           <input
@@ -1221,9 +1285,21 @@ const LikeDetail = ({
             value={tags}
           />
         </label>
-        {item.description && (
-          <p className="likes-description">{item.description}</p>
-        )}
+        <label>
+          Brand
+          <input
+            onChange={(event) => updateDraft('brand', event.target.value)}
+            value={brand}
+          />
+        </label>
+        <label>
+          Description
+          <textarea
+            onChange={(event) => updateDraft('description', event.target.value)}
+            rows={4}
+            value={description}
+          />
+        </label>
         {item.url && (
           <a
             className="likes-link"

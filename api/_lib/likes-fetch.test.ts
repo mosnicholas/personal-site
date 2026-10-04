@@ -226,6 +226,22 @@ test('photo enrichment keeps product identification suggested and records visibl
     const schema = requests[0]?.output_config?.format as
       { schema?: { required?: string[] } } | undefined;
     assert.ok(schema?.schema?.required?.includes('tags'));
+    for (const [contentType, data] of [
+      ['application/pdf', new Uint8Array([1])],
+      ['image/jpeg', new Uint8Array(5 * 1024 * 1024 + 1)],
+    ] as const) {
+      setLikesEnrichmentTestDependencies({
+        client: mockClient({}),
+        readAttachment: async () => ({
+          attachment: { ...item.attachments[0]!, contentType },
+          data,
+        }),
+      });
+      const unsupported = await enrichLike(item);
+      assert.equal(unsupported.status, 'failed');
+      assert.equal(unsupported.identification, 'unknown');
+      assert.match(unsupported.error ?? '', /not a supported size/);
+    }
   } finally {
     setLikesEnrichmentTestDependencies();
   }

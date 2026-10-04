@@ -4,10 +4,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 
-import type { LikeInput } from '../../shared/likes.js';
+import type { LikeInput, LikedItem } from '../../shared/likes.js';
 import { rejectUnauthorizedLikes } from './likes-auth.js';
 import { kickLikes } from './likes-jobs.js';
-import { likesRequestOrigin } from './likes-origin.js';
+import { likesOrigin, likesRequestOrigin } from './likes-origin.js';
 import {
   getImport,
   getLike,
@@ -21,6 +21,23 @@ import {
 
 const MAX_BATCH = 100;
 const MAX_BASE64_BYTES = 2_800_000;
+function feedback(item: LikedItem) {
+  const message =
+    item.status === 'failed'
+      ? 'Saved, but enhancement failed. Your original is retained; retry from the item page.'
+      : item.status === 'pending' || item.status === 'processing'
+        ? item.error
+          ? 'Saved. Enhancement could not finish yet; an automatic retry is queued.'
+          : 'Saved. Enhancement is still in progress.'
+        : item.kind === 'photo' && item.identification === 'unknown'
+          ? 'Organized, but the photo could not be identified.'
+          : 'Enhanced. Review the generated details; photo identification is a suggestion.';
+  return {
+    status: item.status,
+    message,
+    review_url: `${likesOrigin()}/likes?item=${encodeURIComponent(item.id)}`,
+  };
+}
 function result(value: unknown) {
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(value) }],
@@ -85,7 +102,7 @@ export function createLikesMcpServer(): McpServer {
     { name: 'nimo-likes', version: '1.0.0' },
     {
       instructions:
-        'Use save_like for one capture, save_likes for structured batches or pasted notes, search_likes to find captures, and get_like to retrieve an item or import status. Saves and imports continue automatically; report returned status truthfully.',
+        'Use save_like for one capture, save_likes for structured batches or pasted notes, search_likes to find captures, and get_like to retrieve an item or import status. Saves and imports continue automatically. Immediately confirm that the original was saved, then use get_like to check enhancement before claiming it finished. If it is still pending, say it is organizing and share review_url; do not poll indefinitely. When ready, show the title/category/tags and note that photo identification is a suggestion. If enhancement fails, explain that the original is retained and share the review link for correction or retry. There is no automatic push notification back into this chat.',
     },
   );
   server.registerTool(
@@ -126,7 +143,7 @@ export function createLikesMcpServer(): McpServer {
             : undefined,
         );
         if (!saved.duplicate) kickLikes();
-        return result(saved);
+        return result({ ...saved, ...feedback(saved.item) });
       } catch (caught) {
         return error(safeError(caught, 'Could not save like'));
       }
@@ -164,12 +181,11 @@ export function createLikesMcpServer(): McpServer {
         const saved: unknown[] = [];
         for (let index = 0; index < inputs.length; index += 1) {
           try {
-            saved.push(
-              await saveLike(
-                { ...inputs[index]!, source: inputs[index]?.source ?? 'mcp' },
-                idempotency_key ? batchKey(idempotency_key, index) : undefined,
-              ),
+            const capture = await saveLike(
+              { ...inputs[index]!, source: inputs[index]?.source ?? 'mcp' },
+              idempotency_key ? batchKey(idempotency_key, index) : undefined,
             );
+            saved.push({ ...capture, ...feedback(capture.item) });
           } catch (caught) {
             kickLikes();
             return result({
@@ -225,7 +241,7 @@ export function createLikesMcpServer(): McpServer {
     async ({ id }) => {
       try {
         const item = await getLike(id);
-        if (item) return result({ kind: 'like', item, status: item.status });
+        if (item) return result({ kind: 'like', item, ...feedback(item) });
         const batch = await getImport(id);
         if (batch)
           return result({

@@ -241,13 +241,15 @@ test('a newer enrichment response preserves an unsaved Why draft', async ({
   await signIn(page);
   await processStarted.promise;
   await page.locator('.likes-card').first().click();
-  const why = page.locator('.likes-detail textarea');
+  const why = page.getByRole('textbox', { name: 'Why', exact: true });
   await why.fill('Keep this draft');
 
   releaseProcess.resolve();
   await refreshRequested.promise;
   releaseRefresh.resolve();
-  await expect(page.getByText('Fresh metadata', { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('textbox', { name: 'Description', exact: true }),
+  ).toHaveValue('Fresh metadata');
   await expect(why).toHaveValue('Keep this draft');
 });
 
@@ -492,6 +494,7 @@ test('a delayed capture completion reloads the active filter, not its old closur
   const captureStarted = deferred();
   const releaseCapture = deferred();
   const initial = item({ title: 'Initial capture list' });
+  const captured = item({ id: 'captured-item', status: 'pending' });
   const filtered = item({ id: 'filtered-item', title: 'Active filter item' });
 
   await page.route('**/api/likes**', async (route) => {
@@ -505,8 +508,10 @@ test('a delayed capture completion reloads the active filter, not its old closur
     if (route.request().method() === 'POST' && !op) {
       captureStarted.resolve();
       await releaseCapture.promise;
-      return json(route, { item: initial, duplicate: false }, 201);
+      return json(route, { item: captured, duplicate: false }, 201);
     }
+    if (op === 'process')
+      return json(route, { processed: 0, failed: 0, imported: 0, pending: 0 });
     if (route.request().method() === 'GET' && !op) {
       return json(
         route,
@@ -528,6 +533,9 @@ test('a delayed capture completion reloads the active filter, not its old closur
   ).toBeVisible();
 
   releaseCapture.resolve();
+  await expect(page.getByRole('status')).toHaveText(
+    'Saved. Your original is stored.',
+  );
   await expect(
     page.getByText('Active filter item', { exact: true }),
   ).toBeVisible();
@@ -630,7 +638,7 @@ test('a selected pending item remains open when it leaves the active filter', as
   await signIn(page);
   await processStarted.promise;
   await page.locator('.likes-card').first().click();
-  const why = page.locator('.likes-detail textarea');
+  const why = page.getByRole('textbox', { name: 'Why', exact: true });
   await why.fill('Keep this while filtering');
   await page.getByLabel('Filter by category').selectOption('fragrance');
 
@@ -670,7 +678,7 @@ test('a saved Why yields to later server rationale once its draft is committed',
 
   await signIn(page);
   await page.locator('.likes-card').first().click();
-  const why = page.locator('.likes-detail textarea');
+  const why = page.getByRole('textbox', { name: 'Why', exact: true });
   await why.fill('My saved Why');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
 
@@ -704,7 +712,7 @@ test('typing during a pending save keeps the later draft', async ({ page }) => {
 
   await signIn(page);
   await page.locator('.likes-card').first().click();
-  const why = page.locator('.likes-detail textarea');
+  const why = page.getByRole('textbox', { name: 'Why', exact: true });
   await why.fill('First version');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await patchStarted.promise;
@@ -750,7 +758,7 @@ test('a Why-only save patches only note and keeps newer server category', async 
 
   await signIn(page);
   await page.locator('.likes-card').first().click();
-  const why = page.locator('.likes-detail textarea');
+  const why = page.getByRole('textbox', { name: 'Why', exact: true });
   await why.fill('Why only');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
 
@@ -758,4 +766,154 @@ test('a Why-only save patches only note and keeps newer server category', async 
   await expect(page.getByLabel('Category', { exact: true })).toHaveValue(
     'home-fragrance',
   );
+});
+
+test('shows durable capture confirmation and live saved-to-enhanced progress', async ({
+  page,
+}) => {
+  let signedIn = false;
+  let captureSaved = false;
+  let processed = false;
+  const processStarted = deferred();
+  const releaseProcess = deferred();
+  const initial = item({ id: 'existing-like', title: 'Already saved item' });
+  const queued = item({ id: 'photo-like', kind: 'photo', status: 'pending' });
+  const enhanced = item({
+    id: 'photo-like',
+    kind: 'photo',
+    status: 'ready',
+    identification: 'suggested',
+    title: 'Possible cedar bottle',
+  });
+
+  await page.route('**/api/likes**', async (route) => {
+    const url = new URL(route.request().url());
+    const op = url.searchParams.get('op');
+    if (op === 'login') {
+      signedIn = true;
+      return json(route, { success: true });
+    }
+    if (!signedIn) return json(route, { error: 'Sign in' }, 401);
+    if (route.request().method() === 'POST' && !op) {
+      captureSaved = true;
+      return json(route, { item: queued, duplicate: false }, 201);
+    }
+    if (op === 'process') {
+      processStarted.resolve();
+      await releaseProcess.promise;
+      processed = true;
+      return json(route, { processed: 1, failed: 0, imported: 0, pending: 0 });
+    }
+    if (route.request().method() === 'GET' && !op)
+      return json(
+        route,
+        collection([!captureSaved ? initial : processed ? enhanced : queued]),
+      );
+    return json(route, { error: 'Unexpected request' }, 500);
+  });
+
+  await signIn(page);
+  await page
+    .getByRole('textbox', { name: 'What is it?', exact: true })
+    .fill('A cedar bottle');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await processStarted.promise;
+  await expect(page.getByRole('status')).toHaveText(
+    'Saved. Your original is stored.',
+  );
+  await expect(
+    page.getByText('Saved — organizing…', { exact: true }),
+  ).toBeVisible();
+
+  releaseProcess.resolve();
+  await expect(
+    page.getByText('Enhanced — suggested identification', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText(
+    'Saved. Your original is stored.',
+  );
+  await page.locator('.likes-card').first().click();
+  await expect(
+    page.getByText(
+      'This is a suggestion from the photo. Confirm it before relying on it.',
+      { exact: true },
+    ),
+  ).toBeVisible();
+});
+
+test('shows a failed enrichment error and retry guidance', async ({ page }) => {
+  let signedIn = false;
+  const failed = item({
+    status: 'failed',
+    error: 'The enrichment service did not respond.',
+  });
+
+  await page.route('**/api/likes**', async (route) => {
+    const url = new URL(route.request().url());
+    const op = url.searchParams.get('op');
+    if (op === 'login') {
+      signedIn = true;
+      return json(route, { success: true });
+    }
+    if (!signedIn) return json(route, { error: 'Sign in' }, 401);
+    if (route.request().method() === 'GET' && !op)
+      return json(route, collection([failed]));
+    return json(route, { error: 'Unexpected request' }, 500);
+  });
+
+  await signIn(page);
+  await expect(
+    page.getByText('Could not finish organizing', { exact: true }),
+  ).toBeVisible();
+  await page.locator('.likes-card').first().click();
+  await expect(page.getByRole('status')).toContainText(
+    'The enrichment service did not respond. Retry to try again.',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Retry', exact: true }),
+  ).toBeVisible();
+});
+
+test('a brand correction and description correction patch only those fields', async ({
+  page,
+}) => {
+  let signedIn = false;
+  let patchBody: unknown;
+  const initial = item({
+    brand: 'Original brand',
+    description: 'Original description',
+  });
+  const corrected = item({ brand: null, description: 'Corrected description' });
+
+  await page.route('**/api/likes**', async (route) => {
+    const url = new URL(route.request().url());
+    const op = url.searchParams.get('op');
+    if (op === 'login') {
+      signedIn = true;
+      return json(route, { success: true });
+    }
+    if (!signedIn) return json(route, { error: 'Sign in' }, 401);
+    if (route.request().method() === 'PATCH') {
+      patchBody = route.request().postDataJSON();
+      return json(route, { item: corrected });
+    }
+    if (route.request().method() === 'GET' && !op)
+      return json(route, collection([initial]));
+    return json(route, { error: 'Unexpected request' }, 500);
+  });
+
+  await signIn(page);
+  await page.locator('.likes-card').first().click();
+  await page.getByLabel('Brand', { exact: true }).fill('');
+  await page
+    .getByRole('textbox', { name: 'Description', exact: true })
+    .fill('Corrected description');
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+
+  await expect
+    .poll(() => patchBody)
+    .toEqual({
+      brand: null,
+      description: 'Corrected description',
+    });
 });

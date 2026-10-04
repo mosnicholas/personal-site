@@ -465,6 +465,8 @@ const patchSchema = z
     note: z.string().max(10000).optional(),
     category: z.string().trim().min(1).max(80).optional(),
     tags: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+    brand: z.string().trim().min(1).max(160).nullable().optional(),
+    description: z.string().trim().max(2000).optional(),
     snoozedUntil: z.string().datetime().nullable().optional(),
     dismissed: z.boolean().optional(),
   })
@@ -480,13 +482,19 @@ export async function updateLike(
     note: 'note',
     category: 'category',
     tags: 'tags',
+    brand: 'brand',
+    description: 'description',
     snoozedUntil: 'snoozed_until',
     dismissed: 'dismissed',
   };
   const pairs = Object.entries(p.data);
   if (!pairs.length) throw new LikesError('No changes supplied');
   const manual = pairs
-    .filter(([key]) => ['title', 'category', 'tags', 'note'].includes(key))
+    .filter(([key]) =>
+      ['title', 'category', 'tags', 'note', 'brand', 'description'].includes(
+        key,
+      ),
+    )
     .map(([key]) => key);
   const sql = await getLikesSql();
   const rows = await sql.query(

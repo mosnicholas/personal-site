@@ -22,7 +22,9 @@ test('private capture, photo upload, raw note backfill, searching and export', a
   await page.getByLabel('What is it?').fill(unique);
   await page.getByLabel('Why do you like it?').fill('Loved the woody drydown');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('Saved.', { exact: true })).toBeVisible();
+  await expect(page.locator('.likes-notice[role=status]')).toHaveText(
+    'Saved. Your original is stored.',
+  );
   await page.getByPlaceholder('Search', { exact: true }).fill(unique);
   await expect(page.locator('.likes-card')).toHaveCount(1);
   await page.getByPlaceholder('Search', { exact: true }).fill('');

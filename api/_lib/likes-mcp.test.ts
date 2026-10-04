@@ -10,6 +10,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { createLikesMcpServer, handleLikesMcpRequest } from './likes-mcp.js';
+import { getLikesSql, saveLike } from './likes-store.js';
 
 process.env.LIKES_API_KEY = 'test-owner-key-that-is-at-least-32-characters';
 process.env.LIKES_ORIGIN = 'https://likes.test.example';
@@ -76,6 +77,11 @@ test('MCP tools are private and are discoverable by an SDK client after authoriz
   assert.ok(!valid.isError);
   assert.match(JSON.stringify(valid), /"category":"fragrance"/);
   assert.match(JSON.stringify(valid), /"tags":\["woody"\]/);
+  assert.match(JSON.stringify(valid), /Saved\./);
+  assert.match(
+    JSON.stringify(valid),
+    /https:\/\/likes.test.example\/likes\?item=/,
+  );
   const photo = {
     input: { note: 'a small black ceramic mug' },
     photo_base64: (
@@ -115,6 +121,71 @@ test('MCP tools are private and are discoverable by an SDK client after authoriz
   assert.equal(replay.item.id, first.item.id);
   await client.close();
   await server.close();
+});
+test('MCP distinguishes enhancement completion, uncertain identification, retries, and failure', async () => {
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const server = createLikesMcpServer();
+  const client = new Client({ name: 'feedback-test', version: '1.0.0' });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const { item } = await saveLike({ text: `Feedback ${randomUUID()}` });
+    const sql = await getLikesSql();
+    for (const state of [
+      {
+        status: 'processing',
+        identification: 'unknown',
+        error: null,
+        message: /still in progress/,
+      },
+      {
+        status: 'pending',
+        identification: 'unknown',
+        error: 'Provider unavailable',
+        message: /automatic retry is queued/,
+      },
+      {
+        status: 'ready',
+        identification: 'suggested',
+        error: null,
+        message: /Enhanced.*suggestion/,
+      },
+      {
+        status: 'ready',
+        identification: 'unknown',
+        error: null,
+        message: /could not be identified/,
+      },
+      {
+        status: 'failed',
+        identification: 'unknown',
+        error: 'Provider unavailable',
+        message: /enhancement failed.*original is retained/,
+      },
+    ]) {
+      await sql`UPDATE liked_items SET kind='photo',status=${state.status},identification=${state.identification},error=${state.error},lease_id=NULL,available_at=now()+interval '1 day' WHERE id=${item.id}`;
+      const response = await client.callTool({
+        name: 'get_like',
+        arguments: { id: item.id },
+      });
+      assert.ok(!response.isError);
+      const data = response.structuredContent as {
+        status: string;
+        message: string;
+        review_url: string;
+      };
+      assert.equal(data.status, state.status);
+      assert.match(data.message, state.message);
+      assert.equal(
+        data.review_url,
+        `https://likes.test.example/likes?item=${item.id}`,
+      );
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
 });
 test('native HTTP transport initializes and calls tools with the official SDK client', async () => {
   const transport = new StreamableHTTPClientTransport(

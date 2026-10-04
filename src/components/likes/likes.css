@@ -309,9 +309,17 @@
 }
 .likes-card-status {
   display: block;
-  color: #e5958a;
+  color: var(--likes-muted);
   font-size: 0.67rem;
   margin-top: 12px;
+}
+.likes-card-status-ready,
+.likes-item-status-ready {
+  color: #a5c7a0;
+}
+.likes-card-status-failed,
+.likes-item-status-failed {
+  color: #e5958a;
 }
 .likes-empty,
 .likes-state {
@@ -403,13 +411,18 @@
 .likes-detail > label textarea {
   margin-top: 6px;
 }
-.likes-description {
-  color: var(--likes-soft);
+.likes-item-status,
+.likes-identification-caution {
   font-family: 'Roboto', sans-serif;
-  font-size: 0.86rem;
-  line-height: 1.55;
-  margin: 20px 0;
-  white-space: pre-wrap;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: 14px 0 0;
+}
+.likes-item-status {
+  color: var(--likes-soft);
+}
+.likes-identification-caution {
+  color: #e2c580;
 }
 .likes-link {
   display: inline-block;

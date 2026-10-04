@@ -141,7 +141,13 @@ export async function processLikes({
         archiveStatus: 'archive_status',
         error: 'error',
       };
-      const manual = new Set(['title', 'category', 'tags']);
+      const manual = new Set([
+        'title',
+        'category',
+        'tags',
+        'brand',
+        'description',
+      ]);
       const values: unknown[] = [item.id, lease];
       const assignments = Object.entries(fields)
         .filter(([field]) => patch[field as keyof LikedItem] !== undefined)
