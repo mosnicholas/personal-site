@@ -29,3 +29,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .env*
+# Local private capture data and browser verification output
+/test-results
+/playwright-report
+/scripts/likes-data

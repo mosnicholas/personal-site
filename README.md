@@ -86,3 +86,7 @@ See [DEPLOY.md](./DEPLOY.md) for full deployment instructions to Vercel.
 - `DEPLOY.md` - Deployment guide
 
 Enjoy, and please shoot me any feedback you have!
+
+## Private Likes collection
+
+`/likes` captures URLs, notes, and photos into a private searchable collection. The MCP accepts pasted notes for backfill, with automatic categorization, static archives, downloadable exports, and optional weekly resurfacing. See [setup and MCP guide](docs/likes.md).

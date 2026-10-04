@@ -3,6 +3,32 @@
   "framework": "vite",
   "fluid": true,
   "rewrites": [
+    { "source": "/likes", "destination": "/index.html" },
+    { "source": "/likes/", "destination": "/index.html" },
+    {
+      "source": "/.well-known/oauth-protected-resource",
+      "destination": "/api/likes?op=oauth-resource"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource/api/likes",
+      "destination": "/api/likes?op=oauth-resource"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server",
+      "destination": "/api/likes?op=oauth-server"
+    },
+    {
+      "source": "/api/likes/oauth/authorize",
+      "destination": "/api/likes?op=oauth-authorize"
+    },
+    {
+      "source": "/api/likes/oauth/token",
+      "destination": "/api/likes?op=oauth-token"
+    },
+    {
+      "source": "/api/likes/oauth/register",
+      "destination": "/api/likes?op=oauth-register"
+    },
     {
       "source": "/reading",
       "destination": "/index.html"
@@ -13,6 +39,8 @@
     }
   ],
   "crons": [
+    { "path": "/api/likes?op=cron", "schedule": "0 11 * * *" },
+    { "path": "/api/likes?op=digest", "schedule": "30 9 * * 0" },
     {
       "path": "/api/update-prices",
       "schedule": "0 5 * * *"

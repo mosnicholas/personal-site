@@ -7,11 +7,13 @@ import TextScrambler from './components/TextScrambler';
 
 // Loaded on demand, so the reading page never adds to the landing bundle
 const ReadingPage = lazy(() => import('./components/reading/ReadingPage'));
+const LikesPage = lazy(() => import('./components/likes/LikesPage'));
 
 const isTerminalUrl = () =>
   new URLSearchParams(window.location.search).get('mode') === 'terminal';
 
 const isReadingUrl = () => /^\/reading\/?$/.test(window.location.pathname);
+const isLikesUrl = () => /^\/likes\/?$/.test(window.location.pathname);
 
 const Landing = () => {
   const [showNimo, setShowNimo] = useState(false);
@@ -80,6 +82,13 @@ const App = () => {
     return (
       <Suspense fallback={null}>
         <ReadingPage />
+      </Suspense>
+    );
+  }
+  if (isLikesUrl()) {
+    return (
+      <Suspense fallback={null}>
+        <LikesPage />
       </Suspense>
     );
   }
