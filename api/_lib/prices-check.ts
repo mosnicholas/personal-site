@@ -1,9 +1,9 @@
 /**
  * Daily price check, run by api/update-prices.ts. Reads the model price
- * table on Anthropic's pricing page, compares it with the latest prices in
- * `model_prices`, and records each new model or changed price with today as
- * the date it took effect. Then fills in the cost of any call that had no
- * price when it was made.
+ * table and the web search price on Anthropic's pricing page, compares them
+ * with the latest prices in `model_prices`, and records each new model or
+ * changed price with today as the date it took effect. Then fills in the
+ * cost of any call that had no price when it was made.
  *
  * No LLM: a strict parser that refuses to guess. If the page layout changes,
  * nothing is written and the check fails with the reason; a row it can't
@@ -131,7 +131,29 @@ export function parsePricingPage(markdown: string): ListedPrices {
   }
 
   if (prices.size === 0) throw new Error('No readable rows in the price table');
+  const webSearch = parseWebSearchPrice(markdown);
+  for (const price of prices.values()) price.webSearch = webSearch;
   return { prices, rejected };
+}
+
+/**
+ * The web search price, USD per 1,000 searches. The page states it in prose
+ * ("$10 per 1,000 searches"), the same for every model
+ */
+export function parseWebSearchPrice(markdown: string): number {
+  const listed = new Set(
+    [...markdown.matchAll(/\$(\d+(?:\.\d+)?) per 1,000 searches/g)].map(
+      ([, price]) => Number(price),
+    ),
+  );
+  if (listed.size !== 1) {
+    throw new Error(
+      listed.size === 0
+        ? 'No web search price on the page'
+        : `The page lists different web search prices: ${[...listed].join(', ')}`,
+    );
+  }
+  return [...listed][0];
 }
 
 /** The last check's outcome, in sync_state; the weekly email warns from it */
@@ -158,7 +180,9 @@ export interface PriceCheckReport {
 }
 
 const samePrice = (a: Price, b: Price) =>
-  COLUMNS.every(([key]) => Math.abs(a[key] - b[key]) < 1e-9);
+  [...COLUMNS.map(([key]) => key), 'webSearch' as const].every(
+    (key) => Math.abs(a[key] - b[key]) < 1e-9,
+  );
 
 export async function checkPrices(
   sql: Sql,
@@ -197,9 +221,17 @@ export async function checkPrices(
     if (!before) added.push({ model, price });
     else if (!samePrice(before, price)) {
       const { input, output, cacheWrite5m, cacheWrite1h, cacheRead } = before;
+      const { webSearch } = before;
       changed.push({
         model,
-        before: { input, output, cacheWrite5m, cacheWrite1h, cacheRead },
+        before: {
+          input,
+          output,
+          cacheWrite5m,
+          cacheWrite1h,
+          cacheRead,
+          webSearch,
+        },
         after: price,
       });
     }
@@ -216,22 +248,24 @@ export async function checkPrices(
     cache_write_5m: price.cacheWrite5m,
     cache_write_1h: price.cacheWrite1h,
     cache_read: price.cacheRead,
+    web_search: price.webSearch,
     source: PRICING_URL,
   }));
   if (rows.length > 0) {
     await sql`
       INSERT INTO model_prices (model, effective_from, input, output,
-        cache_write_5m, cache_write_1h, cache_read, source)
+        cache_write_5m, cache_write_1h, cache_read, web_search, source)
       SELECT * FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
         AS r(model text, effective_from date, input numeric, output numeric,
           cache_write_5m numeric, cache_write_1h numeric, cache_read numeric,
-          source text)
+          web_search numeric, source text)
       ON CONFLICT (model, effective_from) DO UPDATE SET
         input = excluded.input,
         output = excluded.output,
         cache_write_5m = excluded.cache_write_5m,
         cache_write_1h = excluded.cache_write_1h,
         cache_read = excluded.cache_read,
+        web_search = excluded.web_search,
         source = excluded.source,
         recorded_at = now()`;
     clearPriceCache();

@@ -30,6 +30,7 @@ const PRICE_FIELDS: [keyof Price, string][] = [
   ['cacheWrite1h', '1h cache write'],
   ['cacheRead', 'Cache read'],
   ['output', 'Output'],
+  ['webSearch', 'Web search'],
 ];
 
 const priceCells = (price: Price) =>
@@ -69,7 +70,7 @@ function reportEmail(report: PriceCheckReport): {
   const subject = `Model price check: ${summary}`;
   const html = `<div style="font-family: sans-serif; font-size: 14px">
 <p><b>${summary}.</b></p>
-<p>The daily check compared <a href="${PRICING_URL.replace(/\.md$/, '')}">Anthropic's pricing page</a> with our stored prices. USD per million tokens.</p>
+<p>The daily check compared <a href="${PRICING_URL.replace(/\.md$/, '')}">Anthropic's pricing page</a> with our stored prices. USD per million tokens; web search per 1,000 searches.</p>
 ${
   changedRows.length > 0
     ? `<h2 style="font-size: 16px">Price changes</h2>
@@ -86,7 +87,7 @@ ${
     ? `<h2 style="font-size: 16px">Newly tracked models</h2>
 <p>These models had no prices stored in our database, so there is no previous price to compare. This does not necessarily mean they are newly released models.</p>
 <table style="border-collapse: collapse; font-size: 13px">
-<tr><th align="left" style="padding: 2px 10px">Model</th><th align="left" style="padding: 2px 10px">Input</th><th align="left" style="padding: 2px 10px">5m cache write</th><th align="left" style="padding: 2px 10px">1h cache write</th><th align="left" style="padding: 2px 10px">Cache read</th><th align="left" style="padding: 2px 10px">Output</th></tr>
+<tr><th align="left" style="padding: 2px 10px">Model</th><th align="left" style="padding: 2px 10px">Input</th><th align="left" style="padding: 2px 10px">5m cache write</th><th align="left" style="padding: 2px 10px">1h cache write</th><th align="left" style="padding: 2px 10px">Cache read</th><th align="left" style="padding: 2px 10px">Output</th><th align="left" style="padding: 2px 10px">Web search</th></tr>
 ${addedRows.join('\n')}
 </table>`
     : ''

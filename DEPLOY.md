@@ -21,6 +21,8 @@ In Vercel project settings, add these for Production (and Preview if you want th
 | `RESEND_API_KEY`          | weekly summary email          | Resend → API Keys (see "Email setup" below)           |
 | `WEEKLY_SUMMARY_RECIPIENT_EMAIL` | weekly summary email   | Your inbox (mail comes from `reader@nimo.fyi`)        |
 | `CRON_SECRET`             | both cron jobs                | Make one up: `openssl rand -hex 32 \| pbcopy`          |
+| `PERSONAL_SITE_OWNER_KEY` | `/likes` sign-in and its MCP  | Make one up: `openssl rand -hex 32 \| pbcopy`          |
+| `BLOB_READ_WRITE_TOKEN`   | `/likes` photos, locally      | Not needed on Vercel once a private Blob store is connected (see /likes) |
 
 The cron endpoints refuse requests when `CRON_SECRET` isn't set. Until `READWISE_WEBHOOK_SECRET` is set, the webhook answers Readwise but doesn't tag anything (Readwise only shows the secret after its endpoint test passes). Env var changes only apply to new deployments, so redeploy after adding one.
 
@@ -102,6 +104,21 @@ ORDER BY r.created_at, title;
 
 `nimo.fyi/reading` maps everything saved to the library: a force-directed graph of the tags used by two or more documents (size = documents, colour = cluster, links = tags that share documents), the clusters over time, and a panel per tag with its definition, brief and documents. It reads `/api/reading-graph`, which is public and cached at Vercel's CDN for an hour. Feed items and reading state never appear. The clusters and briefs show up after the first glossary run.
 
+## /likes (private)
+
+`nimo.fyi/likes` is a private collection of things I like: links, notes and photos, each given a title, description, category and tags by Claude Haiku 4.5 (which searches the web to identify products and places), plus a monthly email of a few old ones. Setup:
+
+1. Set `PERSONAL_SITE_OWNER_KEY` (above). It's the password on `/likes`, and signs the tokens Claude uses; changing it signs everything out
+2. Vercel → Storage → Create → Blob, with **private** access, connected to the project. On Vercel it authenticates with the project's OIDC token; `BLOB_READ_WRITE_TOKEN` is only needed to run it locally
+3. Redeploy, open `/likes` and sign in with the key
+4. To save from Claude: Settings → Connectors → Add custom connector → `https://nimo.fyi/api/likes/mcp`, then type the key on the page it opens. Claude can then save links and notes ("save this to my likes"), import pasted notes, and search. For a photo in a chat, Claude saves a note describing it; upload the photo itself on `/likes`
+
+New likes are organized within a minute of saving; `/api/likes?op=process` (daily, 11am UTC) picks up anything left over, and `/api/likes?op=digest` (1st of the month, noon UTC) sends the email. Both take the cron secret:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" "https://nimo.fyi/api/likes?op=process"
+```
+
 ## Reading synthesis
 
 `/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 90 days, so each month's email shows the longer arc (`?days=` from 1 to 183 for a one-off over another window). The first one, over 92 days with 89 documents, took about 3 minutes. Claude Opus 5.5 gets each document's title, source, date, tags, our summary (Readwise's where we don't have one), how far you got, your notes and highlights, and the full text of as many documents as fit in about 120k tokens (shortest first), and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
@@ -131,7 +148,7 @@ Neon doesn't warn before the 1 GB fills up, so the weekly email ends with a line
 
 `cost_usd` is worked out when each call is saved, from the `model_prices` table: one row per model per price, with the date it took effect (`effective_from`), so every call is priced at the rate that applied when it was made and later changes never rewrite history. Calls from before a model's first row use that row.
 
-`/api/update-prices` runs daily at 5am UTC. It reads the price table on [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) (the Markdown version), and records any new model or changed price, dated that day, then fills in the cost of earlier calls that had no price. No LLM is involved: the parser checks the table's columns, reads `$X / MTok` exactly, and leaves out rows that don't look right (output not above input, cache reads not below it). It emails you only when something changes, with a before/after table, or when the check starts failing (a layout change, or a table that looks cut short), in which case nothing is written and calls keep the last known prices. Run it by hand with:
+`/api/update-prices` runs daily at 5am UTC. It reads the price table and the web search price ($10 per 1,000 searches, the same for every model) on [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) (the Markdown version), and records any new model or changed price, dated that day, then fills in the cost of earlier calls that had no price. No LLM is involved: the parser checks the table's columns, reads `$X / MTok` exactly, and leaves out rows that don't look right (output not above input, cache reads not below it). It emails you only when something changes, with a before/after table, or when the check starts failing (a layout change, or a table that looks cut short), in which case nothing is written and calls keep the last known prices. Run it by hand with:
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" "https://nimo.fyi/api/update-prices"
@@ -183,6 +200,7 @@ personal-site/
 │   ├── reading-synthesis.ts # Monthly 90-day synthesis cron (Opus 5.5)
 │   ├── update-prices.ts     # Daily model price check (no LLM)
 │   ├── reading-graph.ts     # Public data for /reading
+│   ├── likes.ts             # /likes API, its MCP server and OAuth, likes crons (Haiku 4.5)
 │   └── _lib/                # Shared helpers (underscore = not deployed as functions)
 ├── src/                     # React app
 ├── index.html               # Vite entry
@@ -190,7 +208,7 @@ personal-site/
 └── package.json
 ```
 
-All functions use the Web standard `export default { fetch(request) }` signature, so they need no Vercel-specific packages.
+All functions use the Web standard `export default { fetch(request) }` signature. Only `/api/likes` uses Vercel packages: `@vercel/blob` for photos and `@vercel/functions` to keep organizing likes after it responds.
 
 ## Troubleshooting
 

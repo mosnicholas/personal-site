@@ -3,32 +3,6 @@
   "framework": "vite",
   "fluid": true,
   "rewrites": [
-    { "source": "/likes", "destination": "/index.html" },
-    { "source": "/likes/", "destination": "/index.html" },
-    {
-      "source": "/.well-known/oauth-protected-resource",
-      "destination": "/api/likes?op=oauth-resource"
-    },
-    {
-      "source": "/.well-known/oauth-protected-resource/api/likes",
-      "destination": "/api/likes?op=oauth-resource"
-    },
-    {
-      "source": "/.well-known/oauth-authorization-server",
-      "destination": "/api/likes?op=oauth-server"
-    },
-    {
-      "source": "/api/likes/oauth/authorize",
-      "destination": "/api/likes?op=oauth-authorize"
-    },
-    {
-      "source": "/api/likes/oauth/token",
-      "destination": "/api/likes?op=oauth-token"
-    },
-    {
-      "source": "/api/likes/oauth/register",
-      "destination": "/api/likes?op=oauth-register"
-    },
     {
       "source": "/reading",
       "destination": "/index.html"
@@ -36,11 +10,33 @@
     {
       "source": "/reading/",
       "destination": "/index.html"
+    },
+    {
+      "source": "/likes",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/likes/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/api/likes/mcp",
+      "destination": "/api/likes?op=mcp"
+    },
+    {
+      "source": "/api/likes/oauth/:step",
+      "destination": "/api/likes?op=oauth-:step"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource/:path*",
+      "destination": "/api/likes?op=oauth-resource"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server/:path*",
+      "destination": "/api/likes?op=oauth-server"
     }
   ],
   "crons": [
-    { "path": "/api/likes?op=cron", "schedule": "0 11 * * *" },
-    { "path": "/api/likes?op=digest", "schedule": "30 9 * * 0" },
     {
       "path": "/api/update-prices",
       "schedule": "0 5 * * *"
@@ -64,6 +60,14 @@
     {
       "path": "/api/reading-synthesis",
       "schedule": "0 10 1 * *"
+    },
+    {
+      "path": "/api/likes?op=process",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/likes?op=digest",
+      "schedule": "0 12 1 * *"
     }
   ]
 }

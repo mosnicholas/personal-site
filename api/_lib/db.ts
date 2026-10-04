@@ -1,8 +1,8 @@
 /**
  * Postgres (Neon's free plan via the Vercel Marketplace, which sets
  * DATABASE_URL). Holds the LLM trace log and model prices, a mirror of the
- * Readwise library with each saved document's text and our summary, and the
- * tag glossary.
+ * Readwise library with each saved document's text and our summary, the tag
+ * glossary, and the likes collection (/likes).
  * Tables are created on first use; MIGRATIONS (below) change existing ones,
  * once each.
  */
@@ -113,6 +113,32 @@ async function createSchema(sql: Sql): Promise<Sql> {
       briefed_at timestamptz
     )`;
 
+  // Things I like (/likes): links, notes and photos I save, with a title,
+  // description, category and tags that Haiku fills in unless I set them
+  // (likes.ts). `photo` is a private Vercel Blob URL; `claimed_at` keeps two
+  // workers off the same like
+  await sql`
+    CREATE TABLE IF NOT EXISTS likes (
+      id text PRIMARY KEY,
+      url text,
+      text text NOT NULL DEFAULT '',
+      note text NOT NULL DEFAULT '',
+      photo text,
+      title text NOT NULL DEFAULT '',
+      description text NOT NULL DEFAULT '',
+      category text,
+      tags text[] NOT NULL DEFAULT '{}',
+      image_url text,
+      sources jsonb NOT NULL DEFAULT '[]',
+      status text NOT NULL DEFAULT 'pending',
+      error text,
+      attempts integer NOT NULL DEFAULT 0,
+      claimed_at timestamptz,
+      source text NOT NULL DEFAULT 'web',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      emailed_at timestamptz
+    )`;
+
   // Resumable progress for long jobs, e.g. the library sync's page cursor
   await sql`
     CREATE TABLE IF NOT EXISTS sync_state (
@@ -210,6 +236,16 @@ const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
         output numeric, cache_write_5m numeric, cache_write_1h numeric,
         cache_read numeric)
       ON CONFLICT DO NOTHING`;
+  },
+
+  // 3. The web search price (USD per 1,000 searches) next to each model's
+  // token prices, so calls that search the web are priced from the table
+  // too. It was $10 for every model when this was added; the default also
+  // covers rows written by code from before this column
+  async (sql) => {
+    await sql`
+      ALTER TABLE model_prices
+        ADD COLUMN IF NOT EXISTS web_search numeric NOT NULL DEFAULT 10`;
   },
 ];
 
