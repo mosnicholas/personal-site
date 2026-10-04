@@ -47,17 +47,10 @@ test('MCP tools are private and are discoverable by an SDK client after authoriz
   await client.connect(clientTransport);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((tool) => tool.name).sort(), [
-    'get_import',
     'get_like',
-    'get_profile',
-    'import_notes',
-    'process_pending_likes',
-    'retry_import',
-    'retry_like',
     'save_like',
     'save_likes',
     'search_likes',
-    'update_like',
   ]);
   const photo = {
     input: { note: 'a small black ceramic mug' },
@@ -111,10 +104,9 @@ test('native HTTP transport initializes and calls tools with the official SDK cl
   );
   const client = new Client({ name: 'http-client-test', version: '1.0.0' });
   await client.connect(transport);
-  assert.ok(
-    (await client.listTools()).tools.some(
-      (tool) => tool.name === 'import_notes',
-    ),
+  assert.deepEqual(
+    (await client.listTools()).tools.map((tool) => tool.name).sort(),
+    ['get_like', 'save_like', 'save_likes', 'search_likes'],
   );
   const saved = await client.callTool({
     name: 'save_like',
@@ -124,11 +116,44 @@ test('native HTTP transport initializes and calls tools with the official SDK cl
     },
   });
   assert.ok(!saved.isError);
+  const structured = await client.callTool({
+    name: 'save_likes',
+    arguments: {
+      inputs: [
+        { text: 'A striped wool blanket', note: 'Good texture' },
+        { url: 'https://example.com/chair', note: 'Simple joinery' },
+      ],
+      idempotency_key: 'http-structured-batch',
+    },
+  });
+  assert.ok(!structured.isError);
+  assert.match(JSON.stringify(structured), /striped wool blanket/);
   const searched = await client.callTool({
     name: 'search_likes',
-    arguments: { query: 'lantern' },
+    arguments: { q: 'lantern' },
   });
   assert.ok(!searched.isError);
   assert.match(JSON.stringify(searched), /brass lantern/);
+  assert.doesNotMatch(
+    JSON.stringify(searched),
+    /striped wool blanket|Simple joinery/,
+  );
+  const imported = await client.callTool({
+    name: 'save_likes',
+    arguments: {
+      inputs: 'A cedar table lamp\nhttps://example.com/lamp',
+      idempotency_key: 'http-raw-import',
+    },
+  });
+  assert.ok(!imported.isError);
+  const importedText = JSON.stringify(imported);
+  const batchId = importedText.match(/[0-9a-f]{8}-[0-9a-f-]{27,}/i)?.[0];
+  assert.ok(batchId);
+  const importStatus = await client.callTool({
+    name: 'get_like',
+    arguments: { id: batchId },
+  });
+  assert.ok(!importStatus.isError);
+  assert.match(JSON.stringify(importStatus), /import/);
   await client.close();
 });

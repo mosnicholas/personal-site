@@ -1,8 +1,9 @@
 /** Render stored snapshots with networking blocked; run on a trusted local worker. */
 import { chromium } from '@playwright/test';
 import type { LikedItem } from '../shared/likes.js';
+import { likesOrigin } from '../api/_lib/likes-origin.js';
 
-const origin = process.env.LIKES_ORIGIN ?? 'https://nimo.fyi';
+const origin = likesOrigin();
 const key = process.env.LIKES_API_KEY;
 if (!key) throw new Error('Set LIKES_API_KEY in the worker environment');
 const api = async (path: string, init?: RequestInit) => {

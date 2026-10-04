@@ -9,6 +9,11 @@ import {
 import { ownerCookie, sameOrigin } from './likes-auth.js';
 import { secretsMatch } from './auth.js';
 import { getLikesSql } from './likes-store.js';
+import {
+  likesOrigin as origin,
+  likesRequestOrigin,
+  isLikesResourceUrl,
+} from './likes-origin.js';
 
 const ACCESS_TOKEN_TTL_SECONDS = 10 * 60;
 const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
@@ -53,20 +58,8 @@ type RefreshToken = {
   scope: string;
 };
 
-function origin(): string {
-  const value = process.env.LIKES_ORIGIN ?? 'https://nimo.fyi';
-  try {
-    const parsed = new URL(value);
-    if (parsed.pathname !== '/' || parsed.search || parsed.hash)
-      throw new Error();
-    return parsed.origin;
-  } catch {
-    throw new Error('LIKES_ORIGIN must be an absolute origin without a path');
-  }
-}
-
-export function mcpResourceUrl(): string {
-  return `${origin()}/api/likes?op=mcp`;
+export function mcpResourceUrl(siteOrigin = origin()): string {
+  return `${siteOrigin}/api/likes?op=mcp`;
 }
 
 function authorizationEndpoint(): string {
@@ -255,7 +248,7 @@ async function validateAuthorizationRequest(
   ) {
     return { error: 'missing or invalid authorization parameters' };
   }
-  if (resource !== mcpResourceUrl())
+  if (!isLikesResourceUrl(resource))
     return { error: 'resource must identify this MCP endpoint' };
   const client = await findClient(clientId);
   if (!client || !redirectUris(client).includes(redirectUri))
@@ -338,7 +331,10 @@ export function createAccessToken(
 }
 
 /** Verifies only access tokens issued by this server for this exact MCP resource. */
-export function verifyOAuthToken(token: string): boolean {
+export function verifyOAuthToken(
+  token: string,
+  expectedResource?: string,
+): boolean {
   const secret = oauthSecret();
   const parts = token.split('.');
   if (!secret || parts.length !== 3) return false;
@@ -365,7 +361,8 @@ export function verifyOAuthToken(token: string): boolean {
       parsedHeader.typ === 'JWT' &&
       claims.iss === origin() &&
       claims.sub === 'owner' &&
-      claims.aud === mcpResourceUrl() &&
+      isLikesResourceUrl(claims.aud) &&
+      (!expectedResource || claims.aud === expectedResource) &&
       claims.scope === 'likes' &&
       typeof claims.iat === 'number' &&
       typeof claims.exp === 'number' &&
@@ -659,7 +656,7 @@ export async function handleLikesOAuthRequest(
       if (request.method !== 'GET')
         return oauthError('invalid_request', 'GET required', 405);
       return json({
-        resource: mcpResourceUrl(),
+        resource: mcpResourceUrl(likesRequestOrigin(request)),
         authorization_servers: [origin()],
         scopes_supported: ['likes'],
         bearer_methods_supported: ['header'],

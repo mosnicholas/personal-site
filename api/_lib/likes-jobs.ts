@@ -174,10 +174,24 @@ export async function processLikes({
   return { ...stats, pending: Number(items.count) + Number(imports.count) };
 }
 let kicked = false;
+export async function drainLikes(budgetMs = 220000) {
+  const deadline = Date.now() + Math.min(budgetMs, 220000);
+  while (Date.now() < deadline) {
+    const stats = await processLikes({
+      limit: 20,
+      budgetMs: deadline - Date.now(),
+    });
+    if (
+      stats.pending === 0 ||
+      (stats.processed === 0 && stats.failed === 0 && stats.imported === 0)
+    )
+      break;
+  }
+}
 export function kickLikes() {
   if (kicked) return;
   kicked = true;
-  const work = processLikes({ limit: 10, budgetMs: 220000 })
+  const work = drainLikes()
     .catch(() => {})
     .finally(() => {
       kicked = false;

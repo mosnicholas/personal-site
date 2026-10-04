@@ -1,8 +1,9 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { secretsMatch } from './auth.js';
 import { verifyOAuthToken } from './likes-oauth.js';
+import { likesOrigin, trustedLikesOrigins } from './likes-origin.js';
 
-export const likesOrigin = () => process.env.LIKES_ORIGIN || 'https://nimo.fyi';
+export { likesOrigin } from './likes-origin.js';
 const cookieName = 'nimo_likes';
 const key = () => process.env.LIKES_API_KEY ?? '';
 const sign = (value: string) =>
@@ -37,8 +38,7 @@ export function ownerCookie(request: Request): boolean {
 }
 export function sameOrigin(request: Request) {
   const origin = request.headers.get('origin');
-  const expected = new URL(likesOrigin()).origin;
-  return origin === expected;
+  return origin !== null && trustedLikesOrigins().includes(origin);
 }
 export function rejectUnauthorizedLikes(
   request: Request,
@@ -51,9 +51,15 @@ export function rejectUnauthorizedLikes(
   const token = request.headers
     .get('authorization')
     ?.match(/^Bearer (.+)$/)?.[1];
+  const actualOrigin = new URL(request.url).origin;
   // Browser sessions must stay in cookies; bearer access accepts only the API
   // key or purpose-scoped OAuth token, never a stolen session as a bearer.
-  if (token && (secretsMatch(token, key()) || verifyOAuthToken(token)))
+  if (
+    token &&
+    (secretsMatch(token, key()) ||
+      (trustedLikesOrigins().includes(actualOrigin) &&
+        verifyOAuthToken(token, `${actualOrigin}/api/likes?op=mcp`)))
+  )
     return undefined;
   if (ownerCookie(request)) {
     if (!['GET', 'HEAD'].includes(request.method) && !sameOrigin(request))

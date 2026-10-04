@@ -15,7 +15,7 @@ import {
 import { exportLikes } from './likes-export.js';
 import { sendLikesDigest } from './likes-digest.js';
 import { archiveLike } from './likes-archive.js';
-import { processLikes } from './likes-jobs.js';
+import { processLikes, drainLikes } from './likes-jobs.js';
 import {
   getImport,
   getLike,
@@ -50,6 +50,7 @@ const key = process.env.LIKES_API_KEY;
 const originalFetch = globalThis.fetch;
 let mailCalls = 0;
 let mailFails = false;
+let failFrontier = false;
 globalThis.fetch = async (input, init) => {
   const url =
     typeof input === 'string'
@@ -62,6 +63,19 @@ globalThis.fetch = async (input, init) => {
       system: string;
       messages: { content: string }[];
     };
+    if (
+      failFrontier &&
+      typeof request.messages[0].content === 'string' &&
+      request.messages[0].content.includes('Failed frontier')
+    ) {
+      return Response.json(
+        {
+          type: 'error',
+          error: { type: 'overloaded_error', message: 'Mock failure' },
+        },
+        { status: 503 },
+      );
+    }
     const payload = request.system.includes('Split')
       ? {
           complete: true,
@@ -392,6 +406,39 @@ test('long backfills checkpoint parsing between bounded runs', async () => {
   assert.equal(Number(finished.parse_cursor), text.length);
   assert.equal(finished.parse_complete, true);
   assert.ok((finished.parsed_items as unknown[]).length > 1);
+});
+
+test('background processing continues across batches without an MCP processing tool', async () => {
+  for (let i = 0; i < 25; i++)
+    await saveLike({
+      text: `Background task ${i}`,
+      title: `Background task ${i}`,
+    });
+  await drainLikes(20000);
+  const tasks = await listLikes({ q: 'Background task', limit: 100 });
+  assert.equal(tasks.total, 25);
+  assert.ok(tasks.items.every((item) => item.status === 'ready'));
+});
+
+test('failed processing batches do not leave healthy saves behind them untouched', async () => {
+  const sql = await getLikesSql();
+  const failedIds = [];
+  for (let i = 0; i < 20; i++)
+    failedIds.push((await saveLike({ text: `Failed frontier ${i}` })).item.id);
+  await sql`UPDATE liked_items SET created_at=now()-interval '1 day' WHERE id=ANY(${failedIds})`;
+  const healthy = await saveLike({
+    text: 'Healthy save after failed frontier',
+  });
+  failFrontier = true;
+  try {
+    await drainLikes(20000);
+  } finally {
+    failFrontier = false;
+  }
+  assert.equal((await getLike(healthy.item.id))!.status, 'ready');
+  const rows =
+    await sql`SELECT attempts FROM liked_items WHERE id=ANY(${failedIds})`;
+  assert.ok(rows.every((row) => Number(row.attempts) === 1));
 });
 
 test('digest opt-in, failures, retries, and successful weekly idempotency', async () => {
