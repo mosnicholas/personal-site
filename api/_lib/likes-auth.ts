@@ -2,12 +2,15 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { secretsMatch } from './auth.js';
 import { verifyOAuthToken } from './likes-oauth.js';
 import { likesOrigin, trustedLikesOrigins } from './likes-origin.js';
+import { likesOwnerKey } from './personal-site-config.js';
 
 export { likesOrigin } from './likes-origin.js';
 const cookieName = 'nimo_likes';
-const key = () => process.env.LIKES_API_KEY ?? '';
+export const effectiveLikesOwnerKey = () => likesOwnerKey();
+const likesBearerKey = () => process.env.LIKES_API_KEY ?? '';
+const ownerKeyIsConfigured = () => effectiveLikesOwnerKey().length >= 32;
 const sign = (value: string) =>
-  createHmac('sha256', key())
+  createHmac('sha256', effectiveLikesOwnerKey())
     .update(`likes-session:${value}`)
     .digest('base64url');
 export function sessionToken(now = Date.now()) {
@@ -15,8 +18,12 @@ export function sessionToken(now = Date.now()) {
   return `${value}.${sign(value)}`;
 }
 export function authorizeLikeToken(token: string): boolean {
-  if (key().length < 32) return false;
-  if (secretsMatch(token, key())) return true;
+  if (!ownerKeyIsConfigured()) return false;
+  if (secretsMatch(token, effectiveLikesOwnerKey())) return true;
+  return isSignedOwnerSessionToken(token);
+}
+function isSignedOwnerSessionToken(token: string): boolean {
+  if (!ownerKeyIsConfigured()) return false;
   const [expires, nonce, mac, extra] = token.split('.');
   return (
     !extra &&
@@ -34,7 +41,7 @@ export function ownerCookie(request: Request): boolean {
     .map((p) => p.trim())
     .find((p) => p.startsWith(cookieName + '='))
     ?.slice(cookieName.length + 1);
-  return Boolean(cookie && cookie !== key() && authorizeLikeToken(cookie));
+  return Boolean(cookie && isSignedOwnerSessionToken(cookie));
 }
 export function sameOrigin(request: Request) {
   const origin = request.headers.get('origin');
@@ -43,7 +50,7 @@ export function sameOrigin(request: Request) {
 export function rejectUnauthorizedLikes(
   request: Request,
 ): Response | undefined {
-  if (key().length < 32)
+  if (!ownerKeyIsConfigured())
     return Response.json(
       { error: 'Private collection is not configured' },
       { status: 503 },
@@ -56,7 +63,9 @@ export function rejectUnauthorizedLikes(
   // key or purpose-scoped OAuth token, never a stolen session as a bearer.
   if (
     token &&
-    (secretsMatch(token, key()) ||
+    (secretsMatch(token, effectiveLikesOwnerKey()) ||
+      (likesBearerKey().length >= 32 &&
+        secretsMatch(token, likesBearerKey())) ||
       (trustedLikesOrigins().includes(actualOrigin) &&
         verifyOAuthToken(token, `${actualOrigin}/api/likes?op=mcp`)))
   )
@@ -75,7 +84,7 @@ export function rejectUnauthorizedLikes(
   );
 }
 export function loginLikes(request: Request, supplied: unknown) {
-  if (key().length < 32)
+  if (!ownerKeyIsConfigured())
     return Response.json(
       { error: 'Private collection is not configured' },
       { status: 503 },
@@ -85,7 +94,10 @@ export function loginLikes(request: Request, supplied: unknown) {
       { error: 'Cross-origin request rejected' },
       { status: 403 },
     );
-  if (typeof supplied !== 'string' || !secretsMatch(supplied, key()))
+  if (
+    typeof supplied !== 'string' ||
+    !secretsMatch(supplied, effectiveLikesOwnerKey())
+  )
     return Response.json({ error: 'Incorrect access key' }, { status: 401 });
   return Response.json(
     { success: true },

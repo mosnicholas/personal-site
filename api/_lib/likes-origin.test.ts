@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { likesOrigin, trustedLikesOrigins } from './likes-origin.js';
+import {
+  likesOrigin,
+  personalSiteOrigin,
+  trustedLikesOrigins,
+} from './likes-origin.js';
 import { sameOrigin, rejectUnauthorizedLikes } from './likes-auth.js';
 import {
   handleLikesOAuthRequest,
@@ -40,6 +44,13 @@ test('production uses its primary domain; previews use their own branch/deployme
 });
 
 test('optional overrides support tests and reject credentials or non-origin URLs', () => {
+  assert.equal(
+    personalSiteOrigin({
+      PERSONAL_SITE_ORIGIN: 'https://site.example',
+      LIKES_ORIGIN: 'http://localhost:5173',
+    }),
+    'https://site.example',
+  );
   assert.equal(
     likesOrigin({ LIKES_ORIGIN: 'http://localhost:5173/' }),
     'http://localhost:5173',

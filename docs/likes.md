@@ -4,15 +4,15 @@
 
 ## Deploy
 
-Set `LIKES_API_KEY` to a new random secret of at least 32 characters and connect a private `BLOB_READ_WRITE_TOKEN`. The owner key is sent only to the login or OAuth-consent form; the web UI uses an HttpOnly cookie afterward.
+Set `PERSONAL_SITE_OWNER_KEY` to a new random secret of at least 32 characters and connect a private `BLOB_READ_WRITE_TOKEN`. Optionally set a distinct `LIKES_API_KEY` for Likes-only bearer access. Existing Likes-only installations may keep using `LIKES_API_KEY` as the owner-key fallback until the general owner key is configured. When both are set, owner login and OAuth consent/signing use the general key; the Likes key is accepted only as a bearer credential by the Likes API. Future private features should use the general owner key directly. Changing the effective owner-key value invalidates existing Likes sessions and OAuth tokens; sign in and reconnect afterward. The web UI sends the owner key only to the login or OAuth-consent form and uses an HttpOnly cookie afterward.
 
-The site URL is inferred from Vercel’s production domain or preview branch/deployment URL. OAuth, cookies, and email links use the same resolver. `LIKES_ORIGIN` is only an optional override for tests or custom hosting; client-supplied Host and forwarded headers cannot change it.
+The site URL is inferred from Vercel’s production domain or preview branch/deployment URL. OAuth, cookies, and email links use the same resolver. `PERSONAL_SITE_ORIGIN` is only an optional override for tests or custom hosting; client-supplied Host and forwarded headers cannot change it. The legacy `LIKES_ORIGIN` override is still accepted when the general override is unset.
 
 ## MCP
 
 Remote Streamable HTTP URL: `https://nimo.fyi/api/likes?op=mcp`.
 
-OAuth-capable clients use discovery, PKCE, and explicit owner consent. A configured bearer client can use `Authorization: Bearer <LIKES_API_KEY>` in its private credential settings.
+OAuth-capable clients use discovery, PKCE, and explicit owner consent. A configured bearer client can use `Authorization: Bearer <LIKES_API_KEY>` (Likes-only access) or the general owner key in its private credential settings.
 
 The MCP intentionally exposes four tools:
 
@@ -56,4 +56,4 @@ npm run test:likes:browser
 
 Backend tests use isolated PGlite databases, private local files, mocked Anthropic/Resend calls, and the official MCP SDK. Browser tests start a local API plus Vite with synthetic notes and a mocked AI provider. They exercise login, capture, photo upload, backfill, search, export, logout, and responsive layouts. Production Blob, provider/account connections, and real email delivery require a configured deployment.
 
-For local interactive work, run the API with `LIKES_ORIGIN=http://localhost:5173 npm run likes:dev`, and Vite with `LIKES_API_PROXY=http://127.0.0.1:3001 npm run start:web`. Set the existing Anthropic key only if you want live enrichment. The local server creates an isolated local database/file store and uses a development-only owner key; its mock provider runs only when explicitly enabled with `LIKES_DEV_MOCK_AI=1`. None of these local settings are allowed in a deployed Vercel function.
+For local interactive work, run the API with `PERSONAL_SITE_ORIGIN=http://localhost:5173 npm run likes:dev`, and Vite with `LIKES_API_PROXY=http://127.0.0.1:3001 npm run start:web`. Set the existing Anthropic key only if you want live enrichment. The local server creates an isolated local database/file store and uses a development-only owner key; its mock provider runs only when explicitly enabled with `LIKES_DEV_MOCK_AI=1`. None of these local settings are allowed in a deployed Vercel function.

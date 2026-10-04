@@ -4,8 +4,11 @@ import type { LikedItem } from '../shared/likes.js';
 import { likesOrigin } from '../api/_lib/likes-origin.js';
 
 const origin = likesOrigin();
-const key = process.env.LIKES_API_KEY;
-if (!key) throw new Error('Set LIKES_API_KEY in the worker environment');
+const key = process.env.LIKES_API_KEY || process.env.PERSONAL_SITE_OWNER_KEY;
+if (!key)
+  throw new Error(
+    'Set LIKES_API_KEY or PERSONAL_SITE_OWNER_KEY in the worker environment',
+  );
 const api = async (path: string, init?: RequestInit) => {
   const headers = new Headers(init?.headers);
   headers.set('Authorization', `Bearer ${key}`);

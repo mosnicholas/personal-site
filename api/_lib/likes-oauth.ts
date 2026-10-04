@@ -6,7 +6,11 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 
-import { ownerCookie, sameOrigin } from './likes-auth.js';
+import {
+  effectiveLikesOwnerKey,
+  ownerCookie,
+  sameOrigin,
+} from './likes-auth.js';
 import { secretsMatch } from './auth.js';
 import { readBoundedText } from './likes-request.js';
 import { getLikesSql } from './likes-store.js';
@@ -73,7 +77,8 @@ function decodeBase64url(value: string): Buffer | undefined {
 }
 
 function oauthSecret(): string | undefined {
-  return process.env.LIKES_API_KEY;
+  const ownerKey = effectiveLikesOwnerKey();
+  return ownerKey.length >= 32 ? ownerKey : undefined;
 }
 
 function tokenHash(token: string): string | undefined {
@@ -299,7 +304,7 @@ export function createAccessToken(
   scope = 'likes',
 ): string {
   const secret = oauthSecret();
-  if (!secret) throw new Error('LIKES_API_KEY is not configured');
+  if (!secret) throw new Error('PERSONAL_SITE_OWNER_KEY is not configured');
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const payload = base64url(
@@ -440,8 +445,9 @@ async function ownerAuthorizedRequest(
   request: Request,
   ownerKey: string,
 ): Promise<Response | undefined> {
-  const key = process.env.LIKES_API_KEY ?? '';
-  if (ownerKey && key && secretsMatch(ownerKey, key)) return undefined;
+  const key = effectiveLikesOwnerKey();
+  if (ownerKey && key.length >= 32 && secretsMatch(ownerKey, key))
+    return undefined;
   if (ownerCookie(request) && sameOrigin(request)) return undefined;
   return Response.json(
     { error: 'Sign in to your collection' },

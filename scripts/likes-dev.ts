@@ -6,10 +6,12 @@ import likes from '../api/likes.js';
 if (process.env.VERCEL || process.env.NODE_ENV === 'production')
   throw new Error('This server is local development only');
 const port = Number(process.env.LIKES_DEV_PORT ?? 3001);
-process.env.LIKES_ORIGIN ??= `http://localhost:${port}`;
+process.env.PERSONAL_SITE_ORIGIN ||=
+  process.env.LIKES_ORIGIN || `http://localhost:${port}`;
 process.env.LIKES_LOCAL_DATABASE ??= '/tmp/nimo-likes-dev-db';
 process.env.LIKES_LOCAL_STORAGE ??= '/tmp/nimo-likes-dev-files';
-process.env.LIKES_API_KEY ??= 'local-development-key-32-characters-only';
+process.env.PERSONAL_SITE_OWNER_KEY ||=
+  process.env.LIKES_API_KEY || 'local-development-key-32-characters-only';
 if (process.env.LIKES_DEV_MOCK_AI === '1') {
   process.env.ANTHROPIC_API_KEY = 'local-mocked-ai';
   const realFetch = globalThis.fetch;
@@ -89,7 +91,7 @@ if (process.env.LIKES_DEV_MOCK_AI === '1') {
 }
 const server = createServer(async (request, response) => {
   try {
-    const origin = process.env.LIKES_ORIGIN!;
+    const origin = process.env.PERSONAL_SITE_ORIGIN!;
     const url = new URL(request.url ?? '/', origin);
     if (url.pathname === '/.well-known/oauth-protected-resource')
       url.searchParams.set('op', 'oauth-resource');
