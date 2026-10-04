@@ -10,7 +10,11 @@
 
 import type { Like } from '../../shared/likes.js';
 import { getSavedDocument, searchDocuments } from './documents.js';
-import { processLikesLater } from './likes-enrich.js';
+import {
+  CATEGORY_DESCRIPTION,
+  processLikesLater,
+  TAGS_DESCRIPTION,
+} from './likes-enrich.js';
 import {
   getLike,
   LikeInputError,
@@ -116,10 +120,13 @@ const TOOLS: Tool[] = [
         description: { type: 'string', description: 'A sentence or two' },
         category: {
           type: 'string',
-          description:
-            'One broad category; search likes to see the ones in use',
+          description: `${CATEGORY_DESCRIPTION}. Search likes to see the ones in use`,
         },
-        tags: { type: 'array', items: { type: 'string' } },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: TAGS_DESCRIPTION,
+        },
       },
       additionalProperties: false,
     },

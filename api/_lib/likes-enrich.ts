@@ -28,7 +28,13 @@ const MODEL = 'claude-haiku-4-5';
 
 const IDENTIFY_PROMPT = `Someone saved this to their collection of things they like: links, notes and photos they keep so they can find them again and remember what each one was. Say exactly what it is: brand and model for a product, the name of a place or work. When that isn't clear from what they saved, like a product in a photo or a place named in a note, search the web to pin it down. Their text, note and photo show what caught their eye: when they single out one version, like a color, a material, or one of several models on a page, say which.`;
 
-const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. From what they saved and what it turned out to be, fill in the details that will let them recognize it at a glance and find it later. When they singled out one version of something, the details are about that version. Reuse one of the collection's categories when one fits.`;
+const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. From what they saved and what it turned out to be, fill in the details: the title and description let them recognize it at a glance, and the category and tags group it with similar things when they browse. When they singled out one version of something, the details are about that version. Reuse one of the collection's categories when one fits.`;
+
+/** What the category and tags are for; Claude saving over MCP is told the same */
+export const CATEGORY_DESCRIPTION =
+  'One broad kind of thing, like furniture, clothing or restaurants';
+export const TAGS_DESCRIPTION =
+  'What kind of thing it is within its category, broad to narrow, like jacket and chore coat in clothing. The title and description hold the brand, materials and other specifics';
 
 const WEB_SEARCH: Anthropic.WebSearchTool20250305 = {
   type: 'web_search_20250305',
@@ -53,11 +59,12 @@ const SAVE_DETAILS: Anthropic.Tool = {
           'What it is, specific enough to recognize: brand and model for a product, the name of a place or work',
       },
       description: { type: 'string', description: 'A sentence or two' },
-      category: {
-        type: 'string',
-        description: 'One broad category, like clothing or restaurants',
+      category: { type: 'string', description: CATEGORY_DESCRIPTION },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: TAGS_DESCRIPTION,
       },
-      tags: { type: 'array', items: { type: 'string' } },
       sources: {
         type: 'array',
         items: { type: 'string' },
