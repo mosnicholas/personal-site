@@ -639,7 +639,12 @@ export async function saveAttachment({
     await writeFile(storageKey, data, { mode: 0o600, flag: 'wx', signal });
     backend = 'local';
   } else {
-    if (!process.env.BLOB_READ_WRITE_TOKEN)
+    const hasReadWriteToken = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
+    const hasOidcCredentials = Boolean(
+      process.env.VERCEL_OIDC_TOKEN?.trim() &&
+        process.env.BLOB_STORE_ID?.trim(),
+    );
+    if (!hasReadWriteToken && !hasOidcCredentials)
       throw new LikesError('Private file storage is not configured', 503);
     const blob = await put(key, Buffer.from(data), {
       access: 'private',
