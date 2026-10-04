@@ -58,8 +58,34 @@ const SAVE_DETAILS: Anthropic.Tool = {
         description: 'One broad category, like clothing or restaurants',
       },
       tags: { type: 'array', items: { type: 'string' } },
+      sources: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'URLs of the search results about this exact thing, best first',
+      },
     },
-    required: ['title', 'description', 'category', 'tags'],
+    required: ['title', 'description', 'category', 'tags', 'sources'],
+    additionalProperties: false,
+  },
+};
+
+const PICK_PROMPT = `Someone saved this to their collection of things they like, and these pictures come from pages about it. Which of them show it? If they singled out one version of it, only pictures of that version. The sharpest of the ones you pick becomes its picture in the collection.`;
+
+const PICK_PICTURES: Anthropic.Tool = {
+  name: 'pick_pictures',
+  description: 'Say which pictures show it.',
+  strict: true,
+  input_schema: {
+    type: 'object',
+    properties: {
+      pictures: {
+        type: 'array',
+        items: { type: 'integer' },
+        description: 'Their numbers; empty if none do',
+      },
+    },
+    required: ['pictures'],
     additionalProperties: false,
   },
 };
@@ -72,8 +98,20 @@ const SPLIT_CHUNK_CHARS = 8_000;
 interface Page {
   title: string;
   description: string;
-  imageUrl: string | null;
   text: string;
+  /** og:image, which some sites set to their own picture on every page */
+  previewImage: string | null;
+  /** The page's first few <img>s */
+  images: string[];
+}
+
+// Image types Claude reads
+const PICTURE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+interface Picture {
+  url: string;
+  type: Anthropic.Base64ImageSource['media_type'];
+  data: Buffer;
 }
 
 /** `<meta>` tags by property or name, e.g. og:image */
@@ -114,59 +152,58 @@ async function fetchPage(url: string): Promise<Page | undefined> {
     }
     const html = await response.text();
     const meta = metaTags(html);
-    const image = meta.get('og:image') ?? meta.get('twitter:image');
-    const imageUrl = image ? new URL(image, response.url).toString() : null;
+    // An image's absolute URL; null for an SVG (Claude can't read it) or a
+    // src that isn't a web URL
+    const absolute = (src: string) => {
+      try {
+        const resolved = new URL(htmlToText(src), response.url).toString();
+        return isHttpUrl(resolved) && !/\.svg(\?|$)/i.test(resolved)
+          ? resolved
+          : null;
+      } catch {
+        return null;
+      }
+    };
+    const preview = meta.get('og:image') ?? meta.get('twitter:image');
+    const images = [...html.matchAll(/<img\b[^>]*?\ssrc\s*=\s*["']([^"']+)/gi)]
+      .map(([, src]) => absolute(src))
+      .filter((url): url is string => url !== null);
     return {
       title:
         meta.get('og:title') ??
         htmlToText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? ''),
       description: meta.get('og:description') ?? meta.get('description') ?? '',
-      imageUrl: imageUrl && isHttpUrl(imageUrl) ? imageUrl : null,
       text: htmlToText(html).slice(0, 20_000),
+      previewImage: preview ? absolute(preview) : null,
+      images: [...new Set(images)].slice(0, 5),
     };
   } catch {
     return undefined;
   }
 }
 
-/** The image file's size in bytes, or 0 if it doesn't load */
-async function imageSize(url: string): Promise<number> {
+/** An image, if it loads and is a kind Claude reads (at most 5 MB) */
+async function loadPicture(url: string): Promise<Picture | undefined> {
   try {
     const response = await fetch(url, {
       headers: { 'User-Agent': USER_AGENT },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!response.headers.get('content-type')?.startsWith('image/')) return 0;
-    return response.ok ? (await response.arrayBuffer()).byteLength : 0;
+    const type = response.headers.get('content-type')?.split(';')[0].trim();
+    if (!response.ok || !type || !PICTURE_TYPES.includes(type)) {
+      return undefined;
+    }
+    const data = Buffer.from(await response.arrayBuffer());
+    return data.length < 5_000_000
+      ? { url, type: type as Picture['type'], data }
+      : undefined;
   } catch {
-    return 0;
+    return undefined;
   }
 }
 
-/**
- * The sharpest of the preview images of the linked page and the source
- * pages, taken to be the biggest file: some sites' preview images are small
- * thumbnails. If none can be loaded from here, the linked page's
- */
-async function bestImage(page: Page | undefined, sources: Like['sources']) {
-  const pages = await Promise.all(
-    sources.slice(0, 5).map((source) => fetchPage(source.url)),
-  );
-  const urls = [
-    ...new Set(
-      [page, ...pages]
-        .map((candidate) => candidate?.imageUrl)
-        .filter((url): url is string => Boolean(url)),
-    ),
-  ];
-  if (urls.length < 2) return urls[0] ?? null;
-  const sizes = await Promise.all(urls.map(imageSize));
-  const biggest = Math.max(...sizes);
-  return biggest > 0 ? urls[sizes.indexOf(biggest)] : urls[0];
-}
-
-/** The request without the photo's bytes, which don't belong in the trace log */
-const withoutPhoto = <Request extends { messages: Anthropic.MessageParam[] }>(
+/** The request without image bytes, which don't belong in the trace log */
+const withoutImages = <Request extends { messages: Anthropic.MessageParam[] }>(
   request: Request,
 ) => ({
   ...request,
@@ -177,7 +214,7 @@ const withoutPhoto = <Request extends { messages: Anthropic.MessageParam[] }>(
           ...message,
           content: message.content.map((block) =>
             block.type === 'image'
-              ? { type: 'image', source: '(photo)' }
+              ? { type: 'image', source: '(image)' }
               : block,
           ),
         },
@@ -207,8 +244,8 @@ function saveContent(
 }
 
 /**
- * Haiku says what the like is, searching the web when it needs to; the
- * pages its answer cites are the sources. A long search pauses the turn,
+ * Haiku says what the like is, searching the web when it needs to. Returns
+ * its answer and the search results it saw. A long search pauses the turn,
  * which is resumed by sending it back.
  *
  * This is a separate request from filling in the details because after a
@@ -218,7 +255,7 @@ function saveContent(
 async function identify(like: Like, content: Anthropic.ContentBlockParam[]) {
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content }];
   let answer = '';
-  const sources = new Map<string, string>();
+  const results = new Map<string, string>();
   for (let turn = 0; turn < MAX_TURNS; turn += 1) {
     const request = {
       model: MODEL,
@@ -234,7 +271,7 @@ async function identify(like: Like, content: Anthropic.ContentBlockParam[]) {
         kind: 'likes_enrichment',
         subjectId: like.id,
         model: MODEL,
-        request: withoutPhoto(request),
+        request: withoutImages(request),
       },
       async () => (response = await getAnthropic().messages.create(request)),
       (message) =>
@@ -243,26 +280,25 @@ async function identify(like: Like, content: Anthropic.ContentBlockParam[]) {
           .join(''),
     );
     for (const block of response.content) {
-      if (block.type !== 'text') continue;
-      for (const citation of block.citations ?? []) {
-        if (
-          citation.type === 'web_search_result_location' &&
-          !sources.has(citation.url)
-        ) {
-          sources.set(citation.url, citation.title ?? citation.url);
+      if (
+        block.type === 'web_search_tool_result' &&
+        Array.isArray(block.content)
+      ) {
+        for (const result of block.content) {
+          results.set(result.url, result.title);
         }
       }
     }
     if (response.stop_reason !== 'pause_turn') break;
     messages.push({ role: 'assistant', content: response.content });
   }
-  return {
-    answer: answer.trim(),
-    sources: [...sources].map(([url, title]) => ({ url, title })),
-  };
+  return { answer: answer.trim(), results };
 }
 
-/** Haiku fills in the details from the save and what it turned out to be */
+/**
+ * Haiku fills in the details from the save, what it turned out to be, and
+ * the search results, picking the ones about it as sources
+ */
 async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
   const categories = await likeCategories();
   const request = {
@@ -278,7 +314,7 @@ async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
       kind: 'likes_enrichment',
       subjectId: like.id,
       model: MODEL,
-      request: withoutPhoto(request),
+      request: withoutImages(request),
     },
     () => getAnthropic().messages.create(request),
     (message) => {
@@ -290,7 +326,9 @@ async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
           `Haiku stopped without saving details (${message.stop_reason})`,
         );
       }
-      return call.input as Omit<LikeDetails, 'imageUrl' | 'sources'>;
+      return call.input as Omit<LikeDetails, 'imageUrl' | 'sources'> & {
+        sources: string[];
+      };
     },
   );
   return {
@@ -298,7 +336,94 @@ async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
     description: details.description.trim(),
     category: details.category.trim(),
     tags: [...new Set(details.tags.map((tag) => tag.trim().toLowerCase()))],
+    sources: details.sources,
   };
+}
+
+/**
+ * The like's image: the sharpest picture that shows it, among the linked
+ * page's preview image and first few images and the sources' preview
+ * images. A preview image can be the site's own picture, a page that moved,
+ * or another version, so Haiku says which pictures show it; of those, the
+ * biggest file is taken to be the sharpest (some sites' are thumbnails)
+ */
+async function pickImage(
+  like: Like,
+  details: Pick<LikeDetails, 'title' | 'description' | 'sources'>,
+  page: Page | undefined,
+): Promise<string | null> {
+  const sourcePages = await Promise.all(
+    details.sources.slice(0, 5).map((source) => fetchPage(source.url)),
+  );
+  const urls = [
+    page?.previewImage,
+    ...(page?.images ?? []),
+    ...sourcePages.map((sourcePage) => sourcePage?.previewImage),
+  ].filter((url): url is string => Boolean(url));
+  const pictures = (
+    await Promise.all([...new Set(urls)].map(loadPicture))
+  ).filter((picture) => picture !== undefined);
+  if (pictures.length === 0) return page?.previewImage ?? null;
+
+  const request = {
+    model: MODEL,
+    max_tokens: 1024,
+    system: PICK_PROMPT,
+    tools: [PICK_PICTURES],
+    tool_choice: { type: 'tool' as const, name: PICK_PICTURES.name },
+    messages: [
+      {
+        role: 'user' as const,
+        content: [
+          ...pictures.flatMap((picture, i) => [
+            { type: 'text' as const, text: `Picture ${i + 1}: ${picture.url}` },
+            {
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: picture.type,
+                data: picture.data.toString('base64'),
+              },
+            },
+          ]),
+          {
+            type: 'text' as const,
+            text: JSON.stringify(
+              {
+                title: details.title,
+                description: details.description,
+                note: like.note || undefined,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      },
+    ],
+  };
+  const shown = await tracedCall(
+    {
+      kind: 'likes_enrichment',
+      subjectId: like.id,
+      model: MODEL,
+      request: withoutImages(request),
+    },
+    () => getAnthropic().messages.create(request),
+    (message) => {
+      const call = message.content.find(
+        (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+      );
+      const numbers =
+        (call?.input as { pictures: number[] } | undefined)?.pictures ?? [];
+      return pictures.filter((_, i) => numbers.includes(i + 1));
+    },
+  ).catch((error: unknown) => {
+    // An image the API won't take shouldn't cost the like its details
+    console.error(`Could not pick an image for like ${like.id}:`, error);
+    return pictures;
+  });
+  return shown.sort((a, b) => b.data.length - a.data.length)[0]?.url ?? null;
 }
 
 async function enrichLike(like: Like): Promise<void> {
@@ -318,19 +443,38 @@ async function enrichLike(like: Like): Promise<void> {
         title: like.title || undefined,
         text: like.text || undefined,
         note: like.note || undefined,
-        page,
+        page: page && {
+          title: page.title,
+          description: page.description,
+          text: page.text,
+        },
       };
-      const { answer, sources } = await identify(
+      const { answer, results } = await identify(
         like,
         saveContent(save, photo),
       );
       const found = await organize(
         like,
-        saveContent({ ...save, what_it_is: answer || undefined }, photo),
+        saveContent(
+          {
+            ...save,
+            what_it_is: answer || undefined,
+            search_results: results.size
+              ? [...results].map(([url, title]) => ({ url, title }))
+              : undefined,
+          },
+          photo,
+        ),
       );
-      details = { ...found, sources };
+      details = {
+        ...found,
+        // Only real search results, so a made-up URL can't become a source
+        sources: [...new Set(found.sources)]
+          .filter((url) => results.has(url))
+          .map((url) => ({ url, title: results.get(url)! })),
+      };
     }
-    const imageUrl = await bestImage(page, details.sources);
+    const imageUrl = await pickImage(like, details, page);
     await finishLike(like.id, { ...details, imageUrl });
   } catch (error) {
     console.error(`Could not enrich like ${like.id}:`, error);
