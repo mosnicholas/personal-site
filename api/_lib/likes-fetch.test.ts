@@ -311,12 +311,14 @@ test('photo enrichment keeps product identification suggested and records visibl
       name: 'web_search',
     });
     assert.equal(requests[0]?.tools?.[0]?.type, 'web_search_20250305');
+    assert.deepEqual(requests[0]?.thinking, { type: 'disabled' });
     assert.equal(requests[0]?.output_config, undefined);
     assert.match(
       JSON.stringify(requests[0]?.messages[0]?.content),
       /Corrected amber edition cue/,
     );
     assert.equal(requests[1]?.tools, undefined);
+    assert.deepEqual(requests[1]?.thinking, { type: 'disabled' });
     assert.match(
       JSON.stringify(requests[1]?.messages[0]?.content),
       /Corrected amber edition cue/,

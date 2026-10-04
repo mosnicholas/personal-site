@@ -91,8 +91,9 @@ test('forces native search and derives sources only from cited tool results', as
     name: 'web_search',
   });
   assert.deepEqual(requests[0]?.tools, [
-    { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
+    { type: 'web_search_20250305', name: 'web_search', max_uses: 10 },
   ]);
+  assert.deepEqual(requests[0]?.thinking, { type: 'disabled' });
   assert.equal(requests[0]?.output_config, undefined);
   assert.equal((options[0] as { signal?: AbortSignal }).signal?.aborted, false);
   assert.deepEqual(result.sources, [
@@ -168,46 +169,49 @@ test('rejects 200 tool errors and responses without successful search', async ()
   );
 });
 
-test('continues two pause_turns with every provider block unchanged and cross-turn sources', async () => {
-  const first = successfulSearch();
-  first.stop_reason = 'pause_turn';
-  const second = response(
-    [
-      { type: 'text', text: 'Continuing the web research.' },
-    ] as unknown as Anthropic.Message['content'],
-    'pause_turn',
+test('continues five pause_turns with cumulative search budgets and unchanged provider blocks', async () => {
+  const pauses = Array.from({ length: 5 }, (_, index) => {
+    const paused = successfulSearch(
+      `https://maker.example/product-${index}`,
+      `Maker Product ${index}`,
+    );
+    paused.stop_reason = 'pause_turn';
+    return paused;
+  });
+  const final = successfulSearch(
+    'https://maker.example/product-final',
+    'Maker Product Final',
   );
-  const final = response([
-    {
-      type: 'text',
-      text: 'Maker Product has a verified product page.',
-      citations: [
-        {
-          type: 'web_search_result_location',
-          url: 'https://maker.example/product',
-          title: 'Maker Product',
-          cited_text: 'The official Maker Product page.',
-          encrypted_index: 'cross-turn-citation',
-        },
-      ],
-    },
-  ] as unknown as Anthropic.Message['content']);
-  const { client, requests } = clientFor([first, second, final]);
+  const { client, requests } = clientFor([...pauses, final]);
   const research = await researchLikeOnWeb({
     client,
     subjectId: 'paused',
     content: 'Maker Product',
   });
-  assert.equal(requests.length, 3);
-  assert.deepEqual(requests[1]?.tool_choice, { type: 'auto' });
-  assert.equal(
-    (requests[1]?.tools?.[0] as Anthropic.WebSearchTool20250305 | undefined)
-      ?.max_uses,
-    2,
+  assert.equal(requests.length, 6);
+  assert.deepEqual(
+    requests.map(
+      (request) =>
+        (request.tools?.[0] as Anthropic.WebSearchTool20250305 | undefined)
+          ?.max_uses,
+    ),
+    [10, 9, 8, 7, 6, 5],
   );
-  assert.equal(requests[1]?.messages[1]?.content, first.content);
-  assert.equal(requests[2]?.messages[2]?.content, second.content);
-  assert.equal(research.sources[0]?.url, 'https://maker.example/product');
+  for (const request of requests) {
+    assert.deepEqual(request.thinking, { type: 'disabled' });
+  }
+  for (let index = 1; index < requests.length; index += 1) {
+    assert.deepEqual(requests[index]?.tool_choice, { type: 'auto' });
+    assert.equal(
+      requests[index]?.messages[index]?.content,
+      pauses[index - 1]?.content,
+    );
+  }
+  assert.equal(research.sources.length, 6);
+  assert.equal(
+    research.sources.at(-1)?.url,
+    'https://maker.example/product-final',
+  );
 });
 
 test('drops private and mismatched citation URLs even when a provider response is well formed', async () => {
@@ -262,7 +266,7 @@ test('rejects refusal, exhausted pauses, and an expired shared deadline', async 
     ] as unknown as Anthropic.Message['content'],
     'pause_turn',
   );
-  const exhausted = clientFor([paused, paused, paused]);
+  const exhausted = clientFor([paused, paused, paused, paused, paused, paused]);
   await assert.rejects(
     () =>
       researchLikeOnWeb({
@@ -272,6 +276,28 @@ test('rejects refusal, exhausted pauses, and an expired shared deadline', async 
       }),
     /did not finish/,
   );
+  assert.equal(exhausted.requests.length, 6);
+  const searchCap = clientFor([
+    response(
+      Array.from({ length: 10 }, (_, index) => ({
+        type: 'web_search_tool_result' as const,
+        tool_use_id: `search-${index}`,
+        caller: { type: 'direct' as const },
+        content: [],
+      })) as unknown as Anthropic.Message['content'],
+      'pause_turn',
+    ),
+  ]);
+  await assert.rejects(
+    () =>
+      researchLikeOnWeb({
+        client: searchCap.client,
+        subjectId: 'search-cap',
+        content: 'x',
+      }),
+    /did not finish/,
+  );
+  assert.equal(searchCap.requests.length, 1);
   const deadline = clientFor([successfulSearch()]);
   await assert.rejects(
     () =>
@@ -324,4 +350,81 @@ test('stage abort stops an SDK response body that stalls after headers', async (
   } finally {
     clearTimeout(keepAlive);
   }
+});
+
+test('a text-only resumed finish retains citations from earlier search results', async () => {
+  const first = successfulSearch();
+  first.stop_reason = 'pause_turn';
+  const second = response(
+    [
+      { type: 'text', text: 'Continuing the web research.' },
+    ] as unknown as Anthropic.Message['content'],
+    'pause_turn',
+  );
+  const final = response([
+    {
+      type: 'text',
+      text: 'Maker Product has a verified product page.',
+      citations: [
+        {
+          type: 'web_search_result_location',
+          url: 'https://maker.example/product',
+          title: 'Maker Product',
+          cited_text: 'The official Maker Product page.',
+          encrypted_index: 'cross-turn-citation',
+        },
+      ],
+    },
+  ] as unknown as Anthropic.Message['content']);
+  const { client, requests } = clientFor([first, second, final]);
+  const research = await researchLikeOnWeb({
+    client,
+    subjectId: 'paused',
+    content: 'Maker Product',
+  });
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests[1]?.tool_choice, { type: 'auto' });
+  assert.equal(
+    (requests[1]?.tools?.[0] as Anthropic.WebSearchTool20250305 | undefined)
+      ?.max_uses,
+    9,
+  );
+  assert.equal(requests[1]?.messages[1]?.content, first.content);
+  assert.equal(requests[2]?.messages[2]?.content, second.content);
+  assert.equal(research.sources[0]?.url, 'https://maker.example/product');
+});
+
+test('research retains a useful later citation beyond the first six candidates', async () => {
+  const search = successfulSearch();
+  const results = search.content.find(
+    (block) => block.type === 'web_search_tool_result',
+  ) as Anthropic.WebSearchToolResultBlock;
+  results.content = Array.from({ length: 7 }, (_, index) => ({
+    type: 'web_search_result' as const,
+    url: `https://maker.example/candidate-${index}`,
+    title: `Candidate ${index}`,
+    page_age: null,
+    encrypted_content: `encrypted-${index}`,
+  }));
+  const text = search.content.find(
+    (block) => block.type === 'text',
+  ) as Anthropic.TextBlock;
+  text.citations = Array.from({ length: 7 }, (_, index) => ({
+    type: 'web_search_result_location' as const,
+    url: `https://maker.example/candidate-${index}`,
+    title: `Candidate ${index}`,
+    cited_text: `Evidence for candidate ${index}.`,
+    encrypted_index: `citation-${index}`,
+  }));
+  const { client } = clientFor([search]);
+  const research = await researchLikeOnWeb({
+    client,
+    subjectId: 'later-match',
+    content: 'Find the correct variant',
+  });
+  assert.ok(
+    research.sources.some(
+      (source) => source.url === 'https://maker.example/candidate-6',
+    ),
+  );
 });
