@@ -28,6 +28,7 @@ export interface FetchedRemote {
 export interface FetchRemoteOptions {
   maxBytes?: number;
   accept?: (contentType: string) => boolean;
+  signal?: AbortSignal;
 }
 
 const isPrivateIpv4 = (address: string) => {
@@ -102,13 +103,27 @@ function parseSafeUrl(input: string): URL {
   return url;
 }
 
-async function pinnedAgent(url: URL): Promise<Agent> {
-  const answers = await dnsLookup(url.hostname, {
-    all: true,
-    verbatim: true,
-  }).catch(() => {
+async function pinnedAgent(url: URL, signal: AbortSignal): Promise<Agent> {
+  signal.throwIfAborted();
+  const answers = await new Promise<{ address: string; family: number }[]>(
+    (resolve, reject) => {
+      const aborted = () => reject(signal.reason);
+      signal.addEventListener('abort', aborted, { once: true });
+      dnsLookup(url.hostname, { all: true, verbatim: true }).then(
+        (value) => {
+          signal.removeEventListener('abort', aborted);
+          resolve(value);
+        },
+        (error) => {
+          signal.removeEventListener('abort', aborted);
+          reject(error);
+        },
+      );
+    },
+  ).catch(() => {
     throw new SafeFetchError('The remote page could not be fetched');
   });
+  signal.throwIfAborted();
   const valid = answers.filter((answer) => isPublicIp(answer.address));
   if (valid.length === 0 || valid.length !== answers.length) {
     throw new SafeFetchError('The URL is not safe to fetch');
@@ -162,17 +177,20 @@ async function readBoundedBody(
  */
 export async function fetchPublicUrl(
   input: string,
-  { maxBytes = DEFAULT_MAX_BYTES, accept }: FetchRemoteOptions = {},
+  { maxBytes = DEFAULT_MAX_BYTES, accept, signal }: FetchRemoteOptions = {},
 ): Promise<FetchedRemote> {
   let url = parseSafeUrl(input);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const agent = await pinnedAgent(url);
+    const hopSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)])
+      : AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const agent = await pinnedAgent(url, hopSignal);
     try {
       const response = await request(url, {
         dispatcher: agent,
         headersTimeout: FETCH_TIMEOUT_MS,
         bodyTimeout: FETCH_TIMEOUT_MS,
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: hopSignal,
         headers: {
           accept:
             'text/html,application/xhtml+xml,image/*,text/css;q=0.9,*/*;q=0.1',
@@ -209,7 +227,7 @@ export async function fetchPublicUrl(
       if (error instanceof SafeFetchError) throw error;
       throw new SafeFetchError('The remote page could not be fetched');
     } finally {
-      await agent.close().catch(() => undefined);
+      await agent.destroy().catch(() => undefined);
     }
   }
   throw new SafeFetchError('The remote page could not be fetched');

@@ -25,14 +25,15 @@ function modelResponse(body: unknown): Anthropic.Message {
 }
 
 function mockClient(
-  body: unknown,
+  body: unknown | Anthropic.Message[],
   requests?: Anthropic.MessageCreateParamsNonStreaming[],
 ): Pick<Anthropic, 'messages'> {
+  const responses = Array.isArray(body) ? [...body] : undefined;
   return {
     messages: {
       create: async (request: Anthropic.MessageCreateParamsNonStreaming) => {
         requests?.push(request);
-        return modelResponse(body);
+        return responses?.shift() ?? modelResponse(body);
       },
     },
   } as unknown as Pick<Anthropic, 'messages'>;
@@ -175,10 +176,11 @@ test('photo enrichment keeps product identification suggested and records visibl
     note: 'Maybe this is the one.',
     category: 'uncategorized',
     tags: [],
-    description: '',
+    description: 'Corrected amber edition cue',
     brand: null,
     extractedText: '',
     identification: 'unknown',
+    webLookup: { status: 'none', sources: [], checkedAt: null },
     status: 'pending',
     archiveStatus: 'none',
     error: null,
@@ -199,23 +201,103 @@ test('photo enrichment keeps product identification suggested and records visibl
         sha256: 'test',
         url: '/api/likes?op=asset&id=original-photo',
       },
+      {
+        id: 'older-archive',
+        itemId: 'photo-test',
+        role: 'archive',
+        filename: 'old.html',
+        contentType: 'text/html',
+        bytes: 3,
+        sha256: 'old',
+        url: '/api/likes?op=asset&id=older-archive',
+      },
+      {
+        id: 'older-image',
+        itemId: 'photo-test',
+        role: 'image',
+        filename: 'old.png',
+        contentType: 'image/png',
+        bytes: 3,
+        sha256: 'old-image',
+        url: '/api/likes?op=asset&id=older-image',
+      },
     ],
   } satisfies LikedItem;
   const requests: Anthropic.MessageCreateParamsNonStreaming[] = [];
   setLikesEnrichmentTestDependencies({
     client: mockClient(
-      {
-        category: 'fragrance',
-        tags: ['perfume'],
-        title: 'Acme',
-        extractedText: 'ACME PARFUM',
-        identification: 'confirmed',
-      },
+      [
+        {
+          content: [
+            {
+              type: 'server_tool_use',
+              id: 'search-1',
+              name: 'web_search',
+              input: { query: 'ACME PARFUM fragrance' },
+            },
+            {
+              type: 'web_search_tool_result',
+              tool_use_id: 'search-1',
+              caller: { type: 'direct' },
+              content: [
+                {
+                  type: 'web_search_result',
+                  url: 'https://acme.example/parfum',
+                  title: 'Acme Parfum',
+                  page_age: null,
+                  encrypted_content: 'encrypted',
+                },
+              ],
+            },
+            {
+              type: 'text',
+              text: 'Acme makes this fragrance.',
+              citations: [
+                {
+                  type: 'web_search_result_location',
+                  url: 'https://acme.example/parfum',
+                  title: 'Acme Parfum',
+                  cited_text: 'Acme Parfum',
+                  encrypted_index: 'citation',
+                },
+              ],
+            },
+          ],
+          stop_reason: 'end_turn',
+        } as unknown as Anthropic.Message,
+        modelResponse({
+          category: 'fragrance',
+          tags: ['perfume'],
+          title: 'Acme',
+          extractedText: 'ACME PARFUM',
+          identification: 'confirmed',
+          lookupStatus: 'matched',
+          sourceIndexes: [0],
+        }),
+      ],
       requests,
     ),
     readAttachment: async () => ({
       attachment: item.attachments[0]!,
       data: new Uint8Array([1, 2, 3]),
+    }),
+    archiveLike: async () => ({
+      patch: {
+        archiveStatus: 'complete',
+        attachments: [
+          ...item.attachments,
+          {
+            ...item.attachments[1]!,
+            id: 'current-archive',
+            url: '/api/likes?op=asset&id=current-archive',
+          },
+          {
+            ...item.attachments[2]!,
+            id: 'current-image',
+            url: '/api/likes?op=asset&id=current-image',
+          },
+        ],
+      },
     }),
   });
   try {
@@ -223,7 +305,33 @@ test('photo enrichment keeps product identification suggested and records visibl
     assert.equal(patch.identification, 'suggested');
     assert.equal(patch.extractedText, 'ACME PARFUM');
     assert.equal(patch.category, 'fragrance');
-    const schema = requests[0]?.output_config?.format as
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[0]?.tool_choice, {
+      type: 'tool',
+      name: 'web_search',
+    });
+    assert.equal(requests[0]?.tools?.[0]?.type, 'web_search_20250305');
+    assert.equal(requests[0]?.output_config, undefined);
+    assert.match(
+      JSON.stringify(requests[0]?.messages[0]?.content),
+      /Corrected amber edition cue/,
+    );
+    assert.equal(requests[1]?.tools, undefined);
+    assert.match(
+      JSON.stringify(requests[1]?.messages[0]?.content),
+      /Corrected amber edition cue/,
+    );
+    assert.equal(patch.webLookup?.status, 'matched');
+    assert.equal(patch.webLookup?.archiveAttachmentId, 'current-archive');
+    assert.deepEqual(patch.webLookup?.imageAttachmentIds, ['current-image']);
+    assert.deepEqual(patch.webLookup?.sources, [
+      {
+        url: 'https://acme.example/parfum',
+        title: 'Acme Parfum',
+        excerpt: 'Acme Parfum',
+      },
+    ]);
+    const schema = requests[1]?.output_config?.format as
       { schema?: { required?: string[] } } | undefined;
     assert.ok(schema?.schema?.required?.includes('tags'));
     for (const [contentType, data] of [
@@ -291,6 +399,25 @@ test('photo trace records private attachment provenance instead of base64 bytes'
           { type: 'text', text: '{"note":"bottle"}' },
         ],
       },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 'search-1',
+            caller: { type: 'direct' },
+            content: [
+              {
+                type: 'web_search_result',
+                url: 'https://maker.example/product',
+                title: 'Maker Product',
+                page_age: null,
+                encrypted_content: 'keep-encrypted-search-result',
+              },
+            ],
+          },
+        ],
+      },
     ],
   } as unknown as Anthropic.MessageCreateParamsNonStreaming;
   const trace = redactPhotoTraceRequest(request, {
@@ -306,4 +433,5 @@ test('photo trace records private attachment provenance instead of base64 bytes'
   const recorded = JSON.stringify(trace);
   assert.doesNotMatch(recorded, /AQIDBA==|base64/);
   assert.match(recorded, /stored-photo|private-sha/);
+  assert.match(recorded, /keep-encrypted-search-result/);
 });

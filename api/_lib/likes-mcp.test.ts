@@ -182,6 +182,40 @@ test('MCP distinguishes enhancement completion, uncertain identification, retrie
         `https://likes.test.example/likes?item=${item.id}`,
       );
     }
+    for (const status of ['matched', 'ambiguous', 'no-match'] as const) {
+      const webLookup = {
+        status,
+        sources:
+          status === 'no-match'
+            ? []
+            : [
+                {
+                  url: 'https://maker.example/cedar',
+                  title: 'Maker Cedar',
+                  excerpt: 'Cedar perfume',
+                },
+              ],
+        checkedAt: new Date().toISOString(),
+      };
+      await sql`UPDATE liked_items SET status='ready',web_lookup=${JSON.stringify(webLookup)}::jsonb WHERE id=${item.id}`;
+      const response = await client.callTool({
+        name: 'get_like',
+        arguments: { id: item.id },
+      });
+      const data = response.structuredContent as {
+        item: { webLookup: unknown };
+        message: string;
+      };
+      assert.deepEqual(data.item.webLookup, webLookup);
+      assert.match(
+        data.message,
+        status === 'matched'
+          ? /likely web match/
+          : status === 'ambiguous'
+            ? /possible web matches/
+            : /no clear match/,
+      );
+    }
   } finally {
     await client.close();
     await server.close();

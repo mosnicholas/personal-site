@@ -2,6 +2,18 @@ export type LikeKind = 'link' | 'note' | 'photo';
 export type JobStatus = 'pending' | 'processing' | 'ready' | 'failed';
 export type ArchiveStatus =
   'none' | 'pending' | 'complete' | 'partial' | 'failed';
+export interface LikeWebSource {
+  url: string;
+  title: string;
+  excerpt: string;
+}
+export interface LikeWebLookup {
+  status: 'none' | 'matched' | 'ambiguous' | 'no-match' | 'failed';
+  sources: LikeWebSource[];
+  checkedAt: string | null;
+  archiveAttachmentId?: string;
+  imageAttachmentIds?: string[];
+}
 export interface LikeInput {
   kind?: LikeKind;
   url?: string;
@@ -36,6 +48,7 @@ export interface LikedItem {
   brand: string | null;
   extractedText: string;
   identification: 'confirmed' | 'suggested' | 'unknown';
+  webLookup: LikeWebLookup;
   status: JobStatus;
   archiveStatus: ArchiveStatus;
   error: string | null;
@@ -54,6 +67,30 @@ export interface ImportBatch {
   duplicates: number;
   error: string | null;
   createdAt: string;
+}
+/** Prefer the original upload, then images belonging to the current archive. */
+export function primaryLikeImage(item: LikedItem): LikeAttachment | undefined {
+  const original = item.attachments.find(
+    (asset) =>
+      asset.role === 'original' && asset.contentType.startsWith('image/'),
+  );
+  if (original) return original;
+  const imageIds = item.webLookup?.imageAttachmentIds;
+  if (imageIds) {
+    return item.attachments.find(
+      (asset) =>
+        imageIds.includes(asset.id) && asset.contentType.startsWith('image/'),
+    );
+  }
+  if (
+    item.kind === 'note' &&
+    item.webLookup &&
+    item.webLookup.status !== 'none'
+  )
+    return undefined;
+  return [...item.attachments]
+    .reverse()
+    .find((asset) => asset.contentType.startsWith('image/'));
 }
 export interface LikesSettings {
   digestEnabled: boolean;

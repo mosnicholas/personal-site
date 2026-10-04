@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { primaryLikeImage } from '../../../shared/likes';
 
 import type {
   ImportBatch,
@@ -84,10 +85,7 @@ const splitTags = (value: string) => [
   ),
 ];
 
-const primaryImage = (item: LikedItem) =>
-  item.attachments.find((attachment) =>
-    attachment.contentType.startsWith('image/'),
-  );
+const primaryImage = primaryLikeImage;
 
 const isPending = (item: LikedItem) => pendingStatuses.has(item.status);
 
@@ -95,6 +93,12 @@ const enrichmentStatus = (item: LikedItem) => {
   if (item.status === 'pending') return 'Saved — organizing…';
   if (item.status === 'processing') return 'Organizing…';
   if (item.status === 'failed') return 'Could not finish organizing';
+  if (item.webLookup?.status === 'matched')
+    return 'Enhanced — likely web match';
+  if (item.webLookup?.status === 'ambiguous')
+    return 'Enhanced — possible web matches';
+  if (item.webLookup?.status === 'no-match')
+    return 'Organized — no clear web match';
   if (item.identification === 'confirmed') return 'Enhanced — identified';
   if (item.identification === 'suggested')
     return 'Enhanced — suggested identification';
@@ -1205,9 +1209,16 @@ const LikeDetail = ({
     }
   };
 
-  const archive = item.attachments.find(
-    (attachment) => attachment.role === 'archive',
-  );
+  const archive =
+    item.kind === 'link' || !item.webLookup || item.webLookup.status === 'none'
+      ? [...item.attachments]
+          .reverse()
+          .find((attachment) => attachment.role === 'archive')
+      : item.attachments.find(
+          (attachment) =>
+            attachment.id === item.webLookup.archiveAttachmentId &&
+            attachment.role === 'archive',
+        );
   return (
     <div
       className="likes-detail-backdrop"
@@ -1255,6 +1266,30 @@ const LikeDetail = ({
             This is a suggestion from the photo. Confirm it before relying on
             it.
           </p>
+        )}
+        {item.webLookup && item.webLookup.status !== 'none' && (
+          <section
+            aria-label="Web lookup sources"
+            className="likes-web-sources"
+          >
+            <p>
+              {item.webLookup.status === 'matched'
+                ? 'Likely match from web sources. Check the product and variant.'
+                : item.webLookup.status === 'ambiguous'
+                  ? 'Several possible matches. Compare the sources before choosing.'
+                  : item.webLookup.status === 'no-match'
+                    ? 'Web search found no clear match. Your original is saved.'
+                    : 'Web lookup could not finish. Your original is saved.'}
+            </p>
+            {item.webLookup.sources.map((source) => (
+              <p key={source.url}>
+                <a href={source.url} rel="noreferrer" target="_blank">
+                  {source.title || source.url}
+                </a>
+                {source.excerpt && <span> — {source.excerpt}</span>}
+              </p>
+            ))}
+          </section>
         )}
         <label>
           Title
@@ -1324,13 +1359,16 @@ const LikeDetail = ({
           >
             {saving ? 'Saving…' : 'Save changes'}
           </button>
-          {item.status === 'failed' && (
+          {(item.status === 'failed' ||
+            (item.status === 'ready' &&
+              item.webLookup?.status !== 'none' &&
+              item.webLookup)) && (
             <button
-              disabled={saving}
+              disabled={saving || dirtyFields.length > 0}
               onClick={() => void action(() => onRetry(item))}
               type="button"
             >
-              Retry
+              {item.status === 'failed' ? 'Retry' : 'Search again'}
             </button>
           )}
           <button

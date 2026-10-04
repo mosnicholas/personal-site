@@ -184,6 +184,11 @@ export function itemFromRow(
     brand: r.brand as string | null,
     extractedText: String(r.extracted_text),
     identification: r.identification as LikedItem['identification'],
+    webLookup: (r.web_lookup as LikedItem['webLookup']) ?? {
+      status: 'none',
+      sources: [],
+      checkedAt: null,
+    },
     status: r.status as LikedItem['status'],
     archiveStatus: r.archive_status as LikedItem['archiveStatus'],
     error: r.error as string | null,
@@ -607,18 +612,22 @@ export async function saveAttachment({
   filename,
   contentType,
   data,
+  signal,
 }: {
   itemId?: string | null;
   role: LikeAttachment['role'];
   filename: string;
   contentType: string;
   data: Uint8Array;
+  signal?: AbortSignal;
 }): Promise<LikeAttachment> {
+  signal?.throwIfAborted();
   if (role === 'original') await validateUpload(contentType, data);
   if (!data.length || data.length > 20 * 1024 * 1024)
     throw new LikesError('File exceeds the 20 MB archive limit');
   if (itemId && !(await getLike(itemId)))
     throw new LikesError('Item not found', 404);
+  signal?.throwIfAborted();
   const id = randomUUID();
   const name = safeFilename(filename);
   const key = `likes/${id}/${name}`;
@@ -627,7 +636,7 @@ export async function saveAttachment({
   if (process.env.LIKES_LOCAL_STORAGE && isLocalLikes()) {
     storageKey = join(resolve(process.env.LIKES_LOCAL_STORAGE), id);
     await mkdir(resolve(process.env.LIKES_LOCAL_STORAGE), { recursive: true });
-    await writeFile(storageKey, data, { mode: 0o600, flag: 'wx' });
+    await writeFile(storageKey, data, { mode: 0o600, flag: 'wx', signal });
     backend = 'local';
   } else {
     if (!process.env.BLOB_READ_WRITE_TOKEN)
@@ -636,26 +645,34 @@ export async function saveAttachment({
       access: 'private',
       contentType,
       addRandomSuffix: false,
+      abortSignal: signal,
     });
     storageKey = blob.url;
     backend = 'blob';
   }
   const sql = await getLikesSql();
+  signal?.throwIfAborted();
   const [row] =
     await sql`INSERT INTO likes_attachments(id,item_id,role,filename,content_type,bytes,sha256,storage_key,backend) VALUES (${id},${itemId ?? null},${role},${name},${contentType},${data.length},${hash(data)},${storageKey},${backend}) RETURNING *`;
   return attachmentFromRow(row);
 }
 export async function readAttachment(
   id: string,
+  signal?: AbortSignal,
 ): Promise<{ attachment: LikeAttachment; data: Uint8Array }> {
+  signal?.throwIfAborted();
   const sql = await getLikesSql();
   const [r] = await sql`SELECT * FROM likes_attachments WHERE id=${id}`;
   if (!r) throw new LikesError('File not found', 404);
+  signal?.throwIfAborted();
   let data: Uint8Array;
   if (r.backend === 'local' && isLocalLikes())
-    data = new Uint8Array(await readFile(String(r.storage_key)));
+    data = new Uint8Array(await readFile(String(r.storage_key), { signal }));
   else if (r.backend === 'blob') {
-    const blob = await get(String(r.storage_key), { access: 'private' });
+    const blob = await get(String(r.storage_key), {
+      access: 'private',
+      abortSignal: signal,
+    });
     if (!blob || blob.statusCode !== 200)
       throw new LikesError('Stored file is unavailable', 502);
     data = new Uint8Array(
@@ -664,6 +681,7 @@ export async function readAttachment(
       ).arrayBuffer(),
     );
   } else throw new LikesError('File storage is unavailable', 503);
+  signal?.throwIfAborted();
   if (data.length !== Number(r.bytes) || hash(data) !== r.sha256)
     throw new LikesError('File integrity check failed', 502);
   return { attachment: attachmentFromRow(r), data };

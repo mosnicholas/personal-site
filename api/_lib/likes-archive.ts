@@ -244,6 +244,7 @@ async function embedImages(
   pageUrl: string,
   itemId: string,
   fetcher: ArchiveFetcher,
+  signal?: AbortSignal,
 ): Promise<{
   attachments: LikeAttachment[];
   embeddedUrls: Set<string>;
@@ -268,12 +269,14 @@ async function embedImages(
         filename: `archive-image-${index + 1}.${remote.contentType.split('/')[1] ?? 'bin'}`,
         contentType: remote.contentType,
         data: remote.body,
+        signal,
       });
       attachments.push(attachment);
       embeddedUrls.add(new URL(source, pageUrl).toString());
       $(image).attr('src', safeDataUrl(remote.contentType, remote.body));
       $(image).removeAttr('srcset');
     } catch {
+      signal?.throwIfAborted();
       partial = true;
       $(image).remove();
     }
@@ -294,6 +297,7 @@ async function embedMetadataImages(
   fetcher: ArchiveFetcher,
   alreadyEmbedded: Set<string>,
   slots: number,
+  signal?: AbortSignal,
 ): Promise<{ attachments: LikeAttachment[]; partial: boolean }> {
   const attachments: LikeAttachment[] = [];
   let partial = false;
@@ -313,6 +317,7 @@ async function embedMetadataImages(
         filename: `archive-metadata-image-${index + 1}.${remote.contentType.split('/')[1] ?? 'bin'}`,
         contentType: remote.contentType,
         data: remote.body,
+        signal,
       });
       attachments.push(attachment);
       alreadyEmbedded.add(imageUrl);
@@ -320,6 +325,7 @@ async function embedMetadataImages(
         `<figure data-likes-archive-preview="metadata"><img src="${safeDataUrl(remote.contentType, remote.body)}" alt=""></figure>`,
       );
     } catch {
+      signal?.throwIfAborted();
       partial = true;
     }
   }
@@ -330,6 +336,7 @@ async function embedStylesheets(
   $: cheerio.CheerioAPI,
   pageUrl: string,
   fetcher: ArchiveFetcher,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   let partial = false;
   const links = $('link[rel~="stylesheet"][href]').toArray();
@@ -350,6 +357,7 @@ async function embedStylesheets(
       partial ||= css.partial;
       $(link).replaceWith(`<style>${css.css}</style>`);
     } catch {
+      signal?.throwIfAborted();
       $(link).remove();
       partial = true;
     }
@@ -361,29 +369,43 @@ async function embedStylesheets(
 export async function archiveLike(
   item: LikedItem,
   fetcher: ArchiveFetcher = fetchPublicUrl,
+  signal?: AbortSignal,
 ): Promise<ArchiveLikeResult> {
+  signal?.throwIfAborted();
   if (!item.url) return { patch: { archiveStatus: 'none' } };
+  const load: ArchiveFetcher = (url, options) => {
+    signal?.throwIfAborted();
+    return fetcher(url, { ...options, signal });
+  };
   try {
-    const remote = await fetcher(item.url, {
+    const remote = await load(item.url, {
       maxBytes: PAGE_MAX_BYTES,
       accept: isHtml,
     });
     const sourceHtml = new TextDecoder().decode(remote.body);
     const metadata = extractArchiveMetadata(sourceHtml, remote.url);
     const document = sanitizedDocument(sourceHtml, remote.url);
-    const images = await embedImages(document.$, remote.url, item.id, fetcher);
+    const images = await embedImages(
+      document.$,
+      remote.url,
+      item.id,
+      load,
+      signal,
+    );
     const metadataImages = await embedMetadataImages(
       document.$,
       metadata.imageUrls,
       item.id,
-      fetcher,
+      load,
       images.embeddedUrls,
       MAX_IMAGES - images.attachments.length,
+      signal,
     );
     const stylesPartial = await embedStylesheets(
       document.$,
       remote.url,
-      fetcher,
+      load,
+      signal,
     );
     const remainingLoadsPartial = removeRemainingRemoteLoads(document.$);
     document
@@ -398,6 +420,7 @@ export async function archiveLike(
       filename: `archive-${item.id}.html`,
       contentType: 'text/html; charset=utf-8',
       data: new TextEncoder().encode(staticHtml),
+      signal,
     });
     const partial =
       document.partial ||
@@ -427,6 +450,7 @@ export async function archiveLike(
         : {}),
     };
   } catch {
+    signal?.throwIfAborted();
     return {
       patch: { archiveStatus: 'failed' },
       error:

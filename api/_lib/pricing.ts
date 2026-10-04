@@ -131,6 +131,7 @@ export interface Usage {
     ephemeral_5m_input_tokens?: number | null;
     ephemeral_1h_input_tokens?: number | null;
   } | null;
+  server_tool_use?: { web_search_requests?: number | null } | null;
 }
 
 export interface TokenUsage {
@@ -164,7 +165,9 @@ export function tokenUsage(usage: Usage, price: Price | undefined): TokenUsage {
         writes1h * price.cacheWrite1h +
         cacheReadInputTokens * price.cacheRead +
         outputTokens * price.output) /
-      1_000_000
+        1_000_000 +
+      // Native web search: $10/1,000 searches, per Anthropic's API docs.
+      (usage.server_tool_use?.web_search_requests ?? 0) * 0.01
     : undefined;
 
   return {

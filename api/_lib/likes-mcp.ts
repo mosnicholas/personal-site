@@ -29,9 +29,15 @@ function feedback(item: LikedItem) {
         ? item.error
           ? 'Saved. Enhancement could not finish yet; an automatic retry is queued.'
           : 'Saved. Enhancement is still in progress.'
-        : item.kind === 'photo' && item.identification === 'unknown'
-          ? 'Organized, but the photo could not be identified.'
-          : 'Enhanced. Review the generated details; photo identification is a suggestion.';
+        : item.webLookup?.status === 'matched'
+          ? 'Enhanced with a likely web match. Review the linked sources and product variant.'
+          : item.webLookup?.status === 'ambiguous'
+            ? 'Organized with several possible web matches. Review the linked sources before choosing.'
+            : item.webLookup?.status === 'no-match'
+              ? 'Organized, but web search found no clear match. Your original is retained.'
+              : item.kind === 'photo' && item.identification === 'unknown'
+                ? 'Organized, but the photo could not be identified.'
+                : 'Enhanced. Review the generated details; photo identification is a suggestion.';
   return {
     status: item.status,
     message,
@@ -102,7 +108,7 @@ export function createLikesMcpServer(): McpServer {
     { name: 'nimo-likes', version: '1.0.0' },
     {
       instructions:
-        'Use save_like for one capture, save_likes for structured batches or pasted notes, search_likes to find captures, and get_like to retrieve an item or import status. Saves and imports continue automatically. Immediately confirm that the original was saved, then use get_like to check enhancement before claiming it finished. If it is still pending, say it is organizing and share review_url; do not poll indefinitely. When ready, show the title/category/tags and note that photo identification is a suggestion. If enhancement fails, explain that the original is retained and share the review link for correction or retry. There is no automatic push notification back into this chat.',
+        'Use save_like for one capture, save_likes for structured batches or pasted notes, search_likes to find captures, and get_like to retrieve an item or import status. Saves and imports continue automatically. Immediately confirm that the original was saved, then use get_like to check enhancement before claiming it finished. If it is still pending, say it is organizing and share review_url; do not poll indefinitely. When ready, show the title/category/tags, cite item.webLookup.sources, and report ambiguous or no-match results truthfully. A likely web match and photo identification remain suggestions requiring review. If enhancement fails, explain that the original is retained and share the review link for correction or retry. There is no automatic push notification back into this chat.',
     },
   );
   server.registerTool(

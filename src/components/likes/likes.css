@@ -424,6 +424,17 @@
 .likes-identification-caution {
   color: #e2c580;
 }
+.likes-web-sources {
+  font:
+    0.8rem/1.45 'Roboto',
+    sans-serif;
+  color: var(--likes-soft);
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+}
+.likes-web-sources a {
+  color: var(--likes-ink);
+}
 .likes-link {
   display: inline-block;
   color: var(--likes-ink);

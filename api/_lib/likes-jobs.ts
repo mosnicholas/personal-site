@@ -129,7 +129,12 @@ export async function processLikes({
     if (!row) break;
     try {
       const item = (await getLike(String(row.id)))!;
-      const patch = await enrichLike(item);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('Processing budget exhausted');
+      const patch = await enrichLike(
+        item,
+        AbortSignal.timeout(Math.min(200_000, remaining)),
+      );
       const fields: Record<string, string> = {
         title: 'title',
         category: 'category',
@@ -138,6 +143,7 @@ export async function processLikes({
         brand: 'brand',
         extractedText: 'extracted_text',
         identification: 'identification',
+        webLookup: 'web_lookup',
         archiveStatus: 'archive_status',
         error: 'error',
       };
@@ -152,8 +158,13 @@ export async function processLikes({
       const assignments = Object.entries(fields)
         .filter(([field]) => patch[field as keyof LikedItem] !== undefined)
         .map(([field, column]) => {
-          values.push(patch[field as keyof LikedItem]);
+          values.push(
+            field === 'webLookup'
+              ? JSON.stringify(patch.webLookup)
+              : patch[field as keyof LikedItem],
+          );
           const arg = `$${values.length}`;
+          if (field === 'webLookup') return `${column}=${arg}::jsonb`;
           return manual.has(field)
             ? `${column}=CASE WHEN '${field}'=ANY(manual_fields) THEN ${column} ELSE ${arg} END`
             : `${column}=${arg}`;

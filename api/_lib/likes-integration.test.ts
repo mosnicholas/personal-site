@@ -15,7 +15,10 @@ import {
 import { exportLikes } from './likes-export.js';
 import { sendLikesDigest } from './likes-digest.js';
 import { archiveLike } from './likes-archive.js';
-import { IMPORT_CHUNK_CHARS } from './likes-enrichment.js';
+import {
+  IMPORT_CHUNK_CHARS,
+  setLikesEnrichmentTestDependencies,
+} from './likes-enrichment.js';
 import { processLikes, drainLikes } from './likes-jobs.js';
 import {
   getImport,
@@ -53,6 +56,9 @@ const originalFetch = globalThis.fetch;
 let mailCalls = 0;
 let mailFails = false;
 let failFrontier = false;
+let webFixtureMatch = false;
+let webFixtureUrl = 'https://example.com/cedar';
+const matchedRequests: string[] = [];
 let frontierFailureGate: Promise<void> | undefined;
 let frontierFailureStarted: (() => void) | undefined;
 globalThis.fetch = async (input, init) => {
@@ -66,6 +72,7 @@ globalThis.fetch = async (input, init) => {
     const request = JSON.parse(String(init?.body)) as {
       system: string;
       messages: { content: string }[];
+      tools?: unknown[];
     };
     if (
       failFrontier &&
@@ -81,6 +88,62 @@ globalThis.fetch = async (input, init) => {
         },
         { status: 503 },
       );
+    }
+    if (webFixtureMatch) matchedRequests.push(JSON.stringify(request));
+    if (request.tools?.length) {
+      return Response.json({
+        id: randomUUID(),
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-haiku-4-5',
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        content: [
+          {
+            type: 'server_tool_use',
+            id: 'search-test',
+            name: 'web_search',
+            input: { query: 'CEDAR perfume' },
+          },
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 'search-test',
+            content: webFixtureMatch
+              ? [
+                  {
+                    type: 'web_search_result',
+                    url: webFixtureUrl,
+                    title: 'Official Cedar perfume',
+                    encrypted_content: 'test-search-content',
+                    page_age: null,
+                  },
+                ]
+              : [],
+          },
+          {
+            type: 'text',
+            text: webFixtureMatch
+              ? 'The label matches Cedar perfume.'
+              : 'No clear web match found.',
+            citations: webFixtureMatch
+              ? [
+                  {
+                    type: 'web_search_result_location',
+                    url: webFixtureUrl,
+                    title: 'Official Cedar perfume',
+                    cited_text: 'CEDAR perfume from Model brand',
+                    encrypted_index: 'test-index',
+                  },
+                ]
+              : [],
+          },
+        ],
+        usage: {
+          input_tokens: 20,
+          output_tokens: 20,
+          server_tool_use: { web_search_requests: 1 },
+        },
+      });
     }
     const payload = request.system.includes('Split')
       ? {
@@ -102,6 +165,8 @@ globalThis.fetch = async (input, init) => {
           brand: 'Model brand',
           identification: 'suggested',
           extractedText: 'TEST LABEL',
+          lookupStatus: webFixtureMatch ? 'matched' : 'no-match',
+          sourceIndexes: webFixtureMatch ? [0] : [],
         };
     return Response.json({
       id: randomUUID(),
@@ -481,7 +546,7 @@ test('automatic retry clears the old enrichment error after recovery', async () 
   }
   const failedAttempt = (await getLike(saved.item.id))!;
   assert.equal(failedAttempt.status, 'pending');
-  assert.match(failedAttempt.error ?? '', /Saved without enrichment/);
+  assert.match(failedAttempt.error ?? '', /Web lookup failed/);
   // Resume the scheduled job directly, without retryLike clearing its error.
   await sql`UPDATE liked_items SET available_at=now() WHERE id=${saved.item.id}`;
   await processLikes({ limit: 1 });
@@ -525,7 +590,7 @@ test('manual brand and description survive a mid-flight failure, scheduled retri
     assert.equal(afterFirstFailure.brand, 'Manual brand');
     assert.equal(afterFirstFailure.description, 'Manual description');
     assert.equal(afterFirstFailure.originalText, originalText);
-    assert.match(afterFirstFailure.error ?? '', /Saved without enrichment/);
+    assert.match(afterFirstFailure.error ?? '', /Web lookup failed/);
 
     await sql`UPDATE liked_items SET available_at=now() WHERE id=${saved.item.id}`;
     await processLikes({ limit: 1 });
@@ -564,6 +629,117 @@ test('manual brand and description survive a mid-flight failure, scheduled retri
   assert.equal(cleared.brand, null);
   assert.equal(cleared.description, '');
   assert.equal(cleared.originalText, originalText);
+});
+
+test('a web-grounded photo retains citations, OCR, and its matched page in API and offline export', async () => {
+  const png = await sharp({
+    create: { width: 3, height: 2, channels: 3, background: '#fff' },
+  })
+    .png()
+    .toBuffer();
+  const saved = await savePhotoLike(
+    { note: 'Loved this bottle in the shop' },
+    {
+      data: png,
+      filename: 'web-bottle.png',
+      contentType: 'image/png',
+    },
+  );
+  const sql = await getLikesSql();
+  await sql`UPDATE liked_items SET status='ready' WHERE id<>${saved.item.id}`;
+  webFixtureMatch = true;
+  setLikesEnrichmentTestDependencies({
+    archiveLike: (item, _fetcher, signal) =>
+      archiveLike(
+        item,
+        async (url) => ({
+          url,
+          contentType: 'text/html',
+          body: new TextEncoder().encode(
+            `<html><head><title>Product webpage title</title></head><body>Product webpage prose, distinct from the bottle label. ${url}</body></html>`,
+          ),
+        }),
+        signal,
+      ),
+  });
+  try {
+    await processLikes({ limit: 1 });
+    const enriched = (await getLike(saved.item.id))!;
+    assert.equal(enriched.status, 'ready');
+    assert.equal(enriched.webLookup.status, 'matched');
+    assert.equal(enriched.identification, 'suggested');
+    assert.equal(enriched.extractedText, 'TEST LABEL');
+    assert.equal(enriched.note, 'Loved this bottle in the shop');
+    assert.equal(enriched.url, null);
+    assert.equal(
+      enriched.webLookup.sources[0]?.url,
+      'https://example.com/cedar',
+    );
+    assert.equal(
+      enriched.attachments.filter((asset) => asset.role === 'archive').length,
+      1,
+    );
+    const firstArchiveId = enriched.webLookup.archiveAttachmentId;
+    assert.ok(firstArchiveId);
+    const correctedCue = 'Distinctive corrected product with silver cap';
+    await updateLike(enriched.id, { description: correctedCue });
+    webFixtureUrl = 'https://example.com/cedar-corrected';
+    await retryLike(enriched.id);
+    await processLikes({ limit: 1 });
+    const refreshed = (await getLike(enriched.id))!;
+    assert.equal(refreshed.status, 'ready');
+    assert.equal(refreshed.description, correctedCue);
+    assert.equal(refreshed.webLookup.sources[0]?.url, webFixtureUrl);
+    assert.ok(refreshed.webLookup.archiveAttachmentId);
+    assert.notEqual(refreshed.webLookup.archiveAttachmentId, firstArchiveId);
+    assert.ok(
+      refreshed.attachments.some((asset) => asset.id === firstArchiveId),
+    );
+    assert.equal(matchedRequests.slice(-2).length, 2);
+    assert.ok(
+      matchedRequests.slice(-2).every((body) => body.includes(correctedCue)),
+    );
+    assert.match(
+      new TextDecoder().decode(
+        (await readAttachment(refreshed.webLookup.archiveAttachmentId!)).data,
+      ),
+      /cedar-corrected/,
+    );
+    const response = await handleLikesRequest(
+      new Request(`http://localhost:3000/api/likes?id=${enriched.id}`, {
+        headers: { Authorization: `Bearer ${key}` },
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      ((await response.json()) as { item: { webLookup: unknown } }).item
+        .webLookup,
+      refreshed.webLookup,
+    );
+    const exported = unzipSync(
+      new Uint8Array(
+        await (
+          await exportLikes({ q: 'Loved this bottle in the shop' })
+        ).arrayBuffer(),
+      ),
+    );
+    const records = JSON.parse(strFromU8(exported['items.json']!));
+    assert.equal(records[0].webLookup.status, 'matched');
+    assert.match(strFromU8(exported['index.html']!), /Official Cedar perfume/);
+    assert.match(
+      strFromU8(exported[`notes/${enriched.id}.txt`]!),
+      /https:\/\/example.com\/cedar/,
+    );
+    const page = records[0].attachments.find(
+      (asset: { id: string }) =>
+        asset.id === records[0].webLookup.archiveAttachmentId,
+    );
+    assert.match(strFromU8(exported[page.url]!), /cedar-corrected/);
+  } finally {
+    webFixtureMatch = false;
+    webFixtureUrl = 'https://example.com/cedar';
+    setLikesEnrichmentTestDependencies();
+  }
 });
 
 test('digest opt-in, failures, retries, and successful weekly idempotency', async () => {

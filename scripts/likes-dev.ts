@@ -22,6 +22,34 @@ if (process.env.LIKES_DEV_MOCK_AI === '1') {
           : input.url;
     if (!url.includes('api.anthropic.com')) return realFetch(input, init);
     const payload = JSON.parse(String(init?.body));
+    if (payload.tools?.length)
+      return Response.json({
+        id: 'mock-search',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-haiku-4-5',
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        content: [
+          {
+            type: 'server_tool_use',
+            id: 'mock-search-tool',
+            name: 'web_search',
+            input: { query: 'CEDAR perfume' },
+          },
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 'mock-search-tool',
+            content: [],
+          },
+          { type: 'text', text: 'No clear web match found.', citations: [] },
+        ],
+        usage: {
+          input_tokens: 10,
+          output_tokens: 10,
+          server_tool_use: { web_search_requests: 1 },
+        },
+      });
     const importing = String(payload.system).includes('Split');
     const source = importing ? String(payload.messages[0].content) : '';
     const value = importing
@@ -44,6 +72,8 @@ if (process.env.LIKES_DEV_MOCK_AI === '1') {
           description: 'A saved item',
           extractedText: 'CEDAR',
           identification: 'suggested',
+          lookupStatus: 'no-match',
+          sourceIndexes: [],
         };
     return Response.json({
       id: 'mock-message',

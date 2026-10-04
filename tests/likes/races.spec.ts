@@ -917,3 +917,185 @@ test('a brand correction and description correction patch only those fields', as
       description: 'Corrected description',
     });
 });
+
+for (const lookupStatus of ['matched', 'ambiguous', 'no-match'] as const) {
+  test(`shows web sources and uncertainty for ${lookupStatus} results`, async ({
+    page,
+  }) => {
+    let signedIn = false;
+    const sources =
+      lookupStatus === 'no-match'
+        ? []
+        : [
+            {
+              url: 'https://maker.example/cedar',
+              title: 'Maker Cedar perfume',
+              excerpt: 'A cedar fragrance in a labelled bottle.',
+            },
+            ...(lookupStatus === 'ambiguous'
+              ? [
+                  {
+                    url: 'https://maker.example/cedar-intense',
+                    title: 'Maker Cedar Intense',
+                    excerpt: 'A similar bottle with a different variant.',
+                  },
+                ]
+              : []),
+          ];
+    const captured = item({
+      kind: 'photo',
+      identification: lookupStatus === 'no-match' ? 'unknown' : 'suggested',
+      webLookup: {
+        status: lookupStatus,
+        sources,
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    let current = captured;
+    let retries = 0;
+    await page.route('**/api/likes**', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('op') === 'login') {
+        signedIn = true;
+        return json(route, { success: true });
+      }
+      if (!signedIn) return json(route, { error: 'Sign in' }, 401);
+      if (url.searchParams.get('op') === 'retry') {
+        retries++;
+        current = item({ ...captured, status: 'pending' });
+        return json(route, { item: current });
+      }
+      if (url.searchParams.get('op') === 'process') {
+        current = item({
+          ...captured,
+          webLookup: {
+            status: 'no-match',
+            sources: [],
+            checkedAt: new Date().toISOString(),
+          },
+          identification: 'unknown',
+        });
+        return json(route, {
+          processed: 1,
+          failed: 0,
+          imported: 0,
+          pending: 0,
+        });
+      }
+      return json(route, collection([current]));
+    });
+    await signIn(page);
+    await page.locator('.likes-card').first().click();
+    const evidence = page.getByRole('region', { name: 'Web lookup sources' });
+    await expect(evidence).toContainText(
+      lookupStatus === 'matched'
+        ? 'Likely match from web sources'
+        : lookupStatus === 'ambiguous'
+          ? 'Several possible matches'
+          : 'Web search found no clear match',
+    );
+    await expect(evidence.getByRole('link')).toHaveCount(sources.length);
+    for (const source of sources)
+      await expect(
+        evidence.getByRole('link', { name: source.title, exact: true }),
+      ).toHaveAttribute('href', source.url);
+    if (lookupStatus === 'matched') {
+      await page
+        .getByRole('button', { name: 'Search again', exact: true })
+        .click();
+      await expect.poll(() => retries).toBe(1);
+      await expect(evidence).toContainText('Web search found no clear match');
+      await expect(evidence.getByRole('link')).toHaveCount(0);
+    }
+  });
+}
+
+test('a new lookup selects its own archive and preview, and no-match hides older copies', async ({
+  page,
+}) => {
+  let signedIn = false;
+  const asset = (id: string, role: string, contentType: string) => ({
+    id,
+    role,
+    contentType,
+    filename: id,
+    itemId: 'like-1',
+    bytes: 0,
+    sha256: 'test',
+    url: `/api/likes?op=asset&id=${id}`,
+  });
+  let current = item({
+    attachments: [
+      asset('archive-old', 'archive', 'text/html'),
+      asset('image-old', 'image', 'image/png'),
+      asset('archive-new', 'archive', 'text/html'),
+      asset('image-new', 'image', 'image/png'),
+    ],
+    archiveStatus: 'complete',
+    webLookup: {
+      status: 'matched',
+      sources: [
+        {
+          url: 'https://maker.example/corrected',
+          title: 'Corrected product',
+          excerpt: 'The corrected variant.',
+        },
+      ],
+      checkedAt: new Date().toISOString(),
+      archiveAttachmentId: 'archive-new',
+      imageAttachmentIds: ['image-new'],
+    },
+  });
+  await page.route('**/api/likes**', (route) => {
+    const url = new URL(route.request().url());
+    const op = url.searchParams.get('op');
+    if (op === 'login') {
+      signedIn = true;
+      return json(route, { success: true });
+    }
+    if (!signedIn) return json(route, { error: 'Sign in' }, 401);
+    if (op === 'asset')
+      return route.fulfill({
+        contentType: 'image/png',
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ2kAAAAASUVORK5CYII=',
+          'base64',
+        ),
+      });
+    if (op === 'retry') {
+      current = item({ ...current, status: 'pending' });
+      return json(route, { item: current });
+    }
+    if (op === 'process') {
+      current = item({
+        ...current,
+        status: 'ready',
+        archiveStatus: 'none',
+        webLookup: {
+          status: 'no-match',
+          sources: [],
+          checkedAt: new Date().toISOString(),
+        },
+      });
+      return json(route, { processed: 1, failed: 0, imported: 0, pending: 0 });
+    }
+    return json(route, collection([current]));
+  });
+  await signIn(page);
+  await expect(page.locator('.likes-card img')).toHaveAttribute(
+    'src',
+    /id=image-new/,
+  );
+  await page.locator('.likes-card').first().click();
+  await expect(
+    page.getByRole('link', { name: 'Download archive', exact: true }),
+  ).toHaveAttribute('href', /id=archive-new/);
+  await page.getByRole('button', { name: 'Search again', exact: true }).click();
+  await expect(
+    page.getByRole('region', { name: 'Web lookup sources' }),
+  ).toContainText('Web search found no clear match');
+  await expect(
+    page.getByRole('link', { name: 'Download archive', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator('.likes-card img')).toHaveCount(0);
+});

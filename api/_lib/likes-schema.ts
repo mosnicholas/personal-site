@@ -13,6 +13,7 @@ export const LIKES_SCHEMA = [
     attempts integer NOT NULL DEFAULT 0, lease_id text, lease_until timestamptz,
     available_at timestamptz NOT NULL DEFAULT now()
   )`,
+  `ALTER TABLE liked_items ADD COLUMN IF NOT EXISTS web_lookup jsonb NOT NULL DEFAULT '{"status":"none","sources":[],"checkedAt":null}'::jsonb`,
   `CREATE INDEX IF NOT EXISTS liked_items_full_text_search ON liked_items USING gin
     (to_tsvector('simple', title || ' ' || original_text || ' ' || note || ' ' || category || ' ' || description || ' ' || extracted_text))`,
   `CREATE TABLE IF NOT EXISTS likes_imports (

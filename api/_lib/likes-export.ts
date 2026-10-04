@@ -1,4 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
+import { primaryLikeImage } from '../../shared/likes.js';
 import { escapeHtml } from './email.js';
 import {
   getLikesSql,
@@ -47,7 +48,7 @@ export async function exportLikes({
     }
     records.push({ ...item, attachments });
     files[`notes/${item.id}.txt`] = strToU8(
-      `${item.title}\n\n${item.originalText}\n\n${item.note}\n\n${item.extractedText}\n\nOriginal URL: ${item.url ?? '(none)'}\n`,
+      `${item.title}\n\n${item.originalText}\n\n${item.note}\n\n${item.extractedText}\n\nOriginal URL: ${item.url ?? '(none)'}\nWeb lookup: ${item.webLookup.status}\n${item.webLookup.sources.map((source) => `${source.title}\n${source.url}\n${source.excerpt}`).join('\n\n')}\n`,
     );
   }
   if (failures.length)
@@ -85,11 +86,15 @@ export async function exportLikes({
   );
   const cards = records
     .map((i) => {
-      const image = i.attachments.find((a) =>
-        a.contentType.startsWith('image/'),
-      );
+      const image = primaryLikeImage(i);
       const archives = i.attachments.filter((a) => a.role === 'archive');
-      return `<article>${image ? `<img src="${escapeHtml(image.url)}" alt="">` : ''}<h2>${escapeHtml(i.title)}</h2><small>${escapeHtml(i.category)} · ${escapeHtml(i.tags.join(', '))}</small><p>${escapeHtml(i.note || i.description)}</p><pre>${escapeHtml(i.originalText)}</pre>${archives.map((a) => `<a href="${escapeHtml(a.url)}">Open saved copy</a>`).join(' ')} <a href="notes/${i.id}.txt">Saved text</a>${i.url ? ` <a href="${escapeHtml(i.url)}" rel="noreferrer">Original URL</a>` : ''}<small>Archive: ${escapeHtml(i.archiveStatus)}</small></article>`;
+      const sources = i.webLookup.sources
+        .map(
+          (source) =>
+            `<p><a href="${escapeHtml(source.url)}" rel="noreferrer">${escapeHtml(source.title || source.url)}</a> — ${escapeHtml(source.excerpt)}</p>`,
+        )
+        .join('');
+      return `<article>${image ? `<img src="${escapeHtml(image.url)}" alt="">` : ''}<h2>${escapeHtml(i.title)}</h2><small>${escapeHtml(i.category)} · ${escapeHtml(i.tags.join(', '))}</small><p>${escapeHtml(i.note || i.description)}</p><pre>${escapeHtml(i.originalText)}</pre>${archives.map((a) => `<a href="${escapeHtml(a.url)}">${a.id === i.webLookup.archiveAttachmentId || (i.kind === 'link' && a === archives.at(-1)) ? 'Open current saved copy' : 'Open earlier saved copy'}</a>`).join(' ')} <a href="notes/${i.id}.txt">Saved text</a>${i.url ? ` <a href="${escapeHtml(i.url)}" rel="noreferrer">Original URL</a>` : ''}<small>Web lookup: ${escapeHtml(i.webLookup.status)} · Archive: ${escapeHtml(i.archiveStatus)}</small>${sources}</article>`;
     })
     .join('\n');
   files['index.html'] = strToU8(
