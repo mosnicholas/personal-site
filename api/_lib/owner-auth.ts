@@ -1,12 +1,14 @@
 /**
- * Who may use /likes: me. One secret, PERSONAL_SITE_OWNER_KEY, signs me in
- * on the site (a signed session cookie), works as a bearer token, and signs
- * the OAuth tokens Claude uses for the MCP server.
+ * The site's owner (me), for /likes and the MCP server. One secret,
+ * PERSONAL_SITE_OWNER_KEY, signs me in on the site (a signed session
+ * cookie), works as a bearer token, and signs the OAuth tokens Claude and
+ * ChatGPT use for the MCP server.
  *
- * The OAuth server is the least Claude's connectors need: discovery, dynamic
+ * The OAuth server is the least their connectors need: discovery, dynamic
  * client registration, and authorization codes with PKCE, approved by typing
- * the key. Everything is a signed token, so there are no tables; changing the
- * key signs everything out.
+ * the key. Codes and tokens carry their own signed contents (what they're
+ * for, the PKCE challenge, the expiry), so nothing is stored and there are no
+ * tables; changing the key signs everything out.
  */
 
 import { createHash, createHmac, randomUUID } from 'node:crypto';
@@ -15,7 +17,7 @@ import { secretsMatch } from './auth.js';
 import { escapeHtml } from './email.js';
 
 const DAY_SECONDS = 86_400;
-const SESSION_COOKIE = 'likes_session';
+const SESSION_COOKIE = 'nimo_session';
 
 const ownerKey = () => process.env.PERSONAL_SITE_OWNER_KEY ?? '';
 
@@ -96,13 +98,15 @@ export const logout = () =>
 
 const origin = (request: Request) => new URL(request.url).origin;
 
+export const mcpUrl = (request: Request) => `${origin(request)}/api/mcp`;
+
 /** Where the MCP server's OAuth metadata is, for its 401s */
 export const resourceMetadataUrl = (request: Request) =>
   `${origin(request)}/.well-known/oauth-protected-resource`;
 
 export function protectedResource(request: Request): Response {
   return Response.json({
-    resource: `${origin(request)}/api/likes/mcp`,
+    resource: mcpUrl(request),
     authorization_servers: [origin(request)],
   });
 }
@@ -111,9 +115,9 @@ export function authorizationServer(request: Request): Response {
   const site = origin(request);
   return Response.json({
     issuer: site,
-    authorization_endpoint: `${site}/api/likes/oauth/authorize`,
-    token_endpoint: `${site}/api/likes/oauth/token`,
-    registration_endpoint: `${site}/api/likes/oauth/register`,
+    authorization_endpoint: `${site}/api/oauth/authorize`,
+    token_endpoint: `${site}/api/oauth/token`,
+    registration_endpoint: `${site}/api/oauth/register`,
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token'],
     code_challenge_methods_supported: ['S256'],
@@ -228,8 +232,8 @@ export async function authorize(request: Request): Promise<Response> {
     .join('\n    ');
   const wrongKey = request.method === 'POST' ? '<p>Wrong key.</p>' : '';
   return page(
-    'Connect to likes',
-    `<p class="muted">${escapeHtml(new URL(redirectUri).host)} wants to save to and search your likes.</p>
+    'Connect to nimo',
+    `<p class="muted">${escapeHtml(new URL(redirectUri).host)} wants to save likes and read your likes and reading.</p>
   ${wrongKey}
   <form method="post">
     ${fields}

@@ -28,7 +28,7 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 
 ### Likes
 - `/likes` - a private collection of links, notes and photos I like, each organized by Claude Haiku 4.5 (which searches the web to identify products and places)
-- An MCP server, so I can save and search from Claude, and paste old notes to import them
+- `/api/mcp` - an MCP server, so Claude or ChatGPT can save likes and search and read my likes and reading
 - A monthly email of a few things I liked a while back
 
 ## Tech Stack

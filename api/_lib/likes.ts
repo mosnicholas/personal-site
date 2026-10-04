@@ -7,10 +7,10 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { del, get, put } from '@vercel/blob';
+import { del, get, put, putImage } from '@vercel/blob';
 
 import type { Like, LikePatch } from '../../shared/likes.js';
-import { requireSql } from './db.js';
+import { requireSql, wordPatterns } from './db.js';
 
 /** A save the caller got wrong, answered with a 400 */
 export class LikeInputError extends Error {}
@@ -22,8 +22,11 @@ export interface NewLike {
   /** Set by me (or Claude, saving over MCP); enrichment keeps them */
   title?: string;
   category?: string;
-  /** A JPEG, resized in the browser before upload */
-  photo?: Uint8Array;
+  /**
+   * A JPEG resized in the browser before upload, or the URL of an image
+   * (ChatGPT passes the photos attached in a chat as temporary URLs)
+   */
+  photo?: Uint8Array | URL;
   /** web, mcp, or import */
   source: string;
 }
@@ -81,19 +84,27 @@ export async function getLike(id: string): Promise<Like | undefined> {
   return row ? likeFromRow(row) : undefined;
 }
 
-/** Likes matching every word of `query` anywhere, newest first */
-export async function searchLikes(query: string, limit = 20): Promise<Like[]> {
-  const patterns = query
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => `%${word.replace(/[\\%_]/g, '\\$&')}%`);
+/**
+ * Likes matching every word of `query` anywhere, newest first; `since` is a
+ * date
+ */
+export async function searchLikes({
+  query = '',
+  since,
+  limit = 20,
+}: {
+  query?: string;
+  since?: string;
+  limit?: number;
+}): Promise<Like[]> {
   const sql = await requireSql();
   const rows = await sql`
     SELECT * FROM likes
-    WHERE NOT EXISTS (
-      SELECT 1 FROM unnest(${patterns}::text[]) AS pattern
-      WHERE concat_ws(' ', url, text, note, title, description, category,
-        array_to_string(tags, ' ')) NOT ILIKE pattern)
+    WHERE (${since ?? null}::date IS NULL OR created_at >= ${since ?? null}::date)
+      AND NOT EXISTS (
+        SELECT 1 FROM unnest(${wordPatterns(query)}::text[]) AS pattern
+        WHERE concat_ws(' ', url, text, note, title, description, category,
+          array_to_string(tags, ' ')) NOT ILIKE pattern)
     ORDER BY created_at DESC
     LIMIT ${limit}`;
   return rows.map(likeFromRow);
@@ -119,14 +130,7 @@ export async function saveLike(like: NewLike): Promise<Like> {
     if (existing) return likeFromRow(existing);
   }
   const id = randomUUID();
-  const photo = like.photo
-    ? (
-        await put(`likes/${id}.jpg`, Buffer.from(like.photo), {
-          access: 'private',
-          contentType: 'image/jpeg',
-        })
-      ).url
-    : null;
+  const photo = like.photo ? await savePhoto(id, like.photo) : null;
   const [row] = await sql`
     INSERT INTO likes (id, url, text, note, photo, title, category, source)
     VALUES (${id}, ${url}, ${text}, ${like.note?.trim() ?? ''}, ${photo},
@@ -134,6 +138,33 @@ export async function saveLike(like: NewLike): Promise<Like> {
       ${like.source})
     RETURNING *`;
   return likeFromRow(row);
+}
+
+/**
+ * Stores a photo as a JPEG in Blob storage and returns its URL. A URL is
+ * fetched and resized by Vercel Image Optimization, which needs the OIDC
+ * credentials Vercel provides (so it doesn't work locally)
+ */
+async function savePhoto(id: string, photo: Uint8Array | URL) {
+  const pathname = `likes/${id}.jpg`;
+  if (!(photo instanceof URL)) {
+    const blob = await put(pathname, Buffer.from(photo), {
+      access: 'private',
+      contentType: 'image/jpeg',
+    });
+    return blob.url;
+  }
+  if (!isHttpUrl(photo.href)) {
+    throw new LikeInputError('Photos need an http:// or https:// URL');
+  }
+  const blob = await putImage(pathname, photo, {
+    access: 'private',
+    optimizeImage: { width: 2048, quality: 85, format: 'jpeg' },
+  }).catch((error: unknown) => {
+    console.error('Could not save the photo:', error);
+    throw new LikeInputError('Couldn’t read that photo');
+  });
+  return blob.url;
 }
 
 /** My edits from /likes; fields left out stay as they are */

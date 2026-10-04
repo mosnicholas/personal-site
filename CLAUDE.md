@@ -1,13 +1,14 @@
 # Personal Site - Code Structure & Context
 
 ## Project Overview
-Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Five parts:
+Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Six parts:
 
 1. **Landing page** - "nicholas moschopoulos" scrambles in, becomes a glitching "nimo", and the tagline streams in like an LLM response.
 2. **Terminal mode** (`?mode=terminal`, or press `~`/`t` on the landing page) - retro boot sequence, then a chat with a Claude-powered assistant about nimo.
 3. **Reading workflows** (migrated from n8n) - a Readwise webhook that summarizes and tags new documents, a daily sync that mirrors the library into Postgres, weekly crons that rebalance the taxonomy, write a tag glossary, and email a summary of the week's reading, and a monthly cron that emails a longer synthesis.
 4. **Reading map** (`/reading`, public) - a force-directed map of the tags, clustered, with a timeline and per-tag briefs, served from the mirror.
-5. **Likes** (`/likes`, private, just for nimo) - links, notes and photos he likes, organized by Haiku, saved from the page or from Claude over MCP, with a monthly email resurfacing old ones.
+5. **Likes** (`/likes`, private, just for nimo) - links, notes and photos he likes, organized by Haiku, saved from the page or over MCP, with a monthly email resurfacing old ones.
+6. **MCP server** (`/api/mcp`, private) - lets Claude and ChatGPT save likes and search and read both likes and the reading mirror.
 
 ## Tech Stack
 - **React 19.3** + **TypeScript 6.0** (strict), vanilla CSS
@@ -50,7 +51,8 @@ personal-site/
 │   ├── reading-synthesis.ts   # 1st of the month 10am UTC cron: email a synthesis of the last 90 days
 │   ├── reading-graph.ts       # Public, CDN-cached data for /reading
 │   ├── update-prices.ts       # Daily 5am UTC cron: record model price changes from Anthropic's pricing page
-│   ├── likes.ts               # /likes API, its MCP server and OAuth (rewritten here as ?op=), likes crons
+│   ├── likes.ts               # /likes API and the likes crons (daily leftovers, monthly email)
+│   ├── mcp.ts                 # The MCP server and its OAuth endpoints (rewritten here as ?op=)
 │   ├── tsconfig.json          # Node/ESM config; Vercel also uses it to compile /api
 │   └── _lib/                  # Helpers; underscore keeps Vercel from deploying them as functions
 │       ├── anthropic.ts       # Shared Anthropic client (checks ANTHROPIC_API_KEY)
@@ -61,8 +63,8 @@ personal-site/
 │       ├── glossary.ts        # Opus definitions + clusters, Sonnet tag briefs (`tags` table)
 │       ├── likes.ts           # The `likes` table and photos in Blob: list, search, save, edit, claim for enrichment
 │       ├── likes-enrich.ts    # Haiku fills in title/description/category/tags (web search for photos and notes); splits pasted notes
-│       ├── likes-auth.ts      # Owner key: session cookie, bearer, and a stateless OAuth server for Claude's connector
-│       ├── likes-mcp.ts       # Minimal MCP server (save_like, import_likes, search_likes), no SDK
+│       ├── owner-auth.ts      # Owner key: session cookie, bearer, and a stateless OAuth server for MCP clients
+│       ├── mcp.ts             # Minimal MCP server (save, search, get) over likes and reading, no SDK
 │       ├── likes-digest.ts    # Monthly email of a few old likes
 │       ├── graph.ts           # Queries behind /api/reading-graph
 │       ├── pricing.ts         # Dated model prices (`model_prices`), price lookup, the cost of a call from its usage
@@ -82,7 +84,7 @@ personal-site/
 ├── vite.config.ts
 ├── eslint.config.js
 ├── tsconfig.json              # References tsconfig.app.json, tsconfig.node.json, api/
-├── vercel.json                # framework: vite, fluid: true (300s functions), /reading and /likes rewrites, likes MCP/OAuth paths, crons
+├── vercel.json                # framework: vite, fluid: true (300s functions), /reading and /likes rewrites, OAuth paths, crons
 └── .npmrc                     # min-release-age=7
 ```
 
@@ -119,8 +121,13 @@ personal-site/
 - Saving answers right away; enrichment runs after the response (`waitUntil`) and daily at 11am UTC for leftovers. Haiku 4.5 gets the link's fetched page (og: title, description, image, text), the text and note, and the photo, may run up to 10 web searches (resuming paused turns, 6 requests at most; thinking off), and finishes with a strict `save_details` tool call. Sources are only kept if they were real search results. Enrichment fills only empty fields, so anything I set (or Claude set over MCP) stays. Failures retry after 5 minutes, 3 tries, then show a Retry button
 - Saving a link that's already saved returns the existing like
 - Pasted notes are split by Haiku (structured output) in ~8k-character pieces; a piece that fails is saved whole
-- Auth: `PERSONAL_SITE_OWNER_KEY` signs in on the page (30-day HttpOnly cookie), works as a bearer token, and signs OAuth codes and tokens (HMAC, purpose-bound, no tables). Claude connects to `https://nimo.fyi/api/likes/mcp`: discovery, dynamic registration (anyone may register; I approve by typing the key), PKCE, 1-day access and 90-day refresh tokens. Changing the key signs everything out
+- Auth (`owner-auth.ts`, shared with the MCP server): `PERSONAL_SITE_OWNER_KEY` signs in on the page (30-day HttpOnly cookie), works as a bearer token, and signs OAuth codes and tokens (HMAC, purpose-bound, no tables). Changing the key signs everything out
 - Monthly email (1st, noon UTC): 5 ready likes saved over 30 days ago, least recently emailed first, via `sendReadingEmail`
+
+### MCP server (`/api/mcp`)
+- For Claude and ChatGPT connectors: OAuth discovery (`/.well-known/...`), dynamic registration (anyone may register; I approve by typing the key on the consent page), PKCE, 1-day access and 90-day refresh tokens, all stateless signed tokens
+- Hand-written JSON-RPC (stateless, JSON responses, no SSE), not the MCP SDK (~100 dependencies). Tools are entries in `TOOLS`; add a source by adding tools or results there
+- Three tools: `save` (a like; `photo` is a ChatGPT file param, `_meta["openai/fileParams"]`, or any public image URL, fetched and resized to JPEG by Blob `putImage`, which needs Vercel's OIDC), `search` (likes and saved reading, every word must match, `source` and `since` filters), `get` (a like with its photo as an image, or a saved document with its summary and up to 100k chars of text). Feed items aren't included. Claude can't pass chat images to tools, so photos from Claude only work as URLs
 
 ### LLM traces
 - Every LLM call goes through `tracedCall` / `recordTrace` in `api/_lib/traces.ts`: kind (`chat`, `tagging`, `document_summary`, `rebalance`, `tag_glossary`, `tag_brief`, `weekly_summary`, `reading_synthesis`, `likes_enrichment`, `likes_import`), subject id (Readwise document id for tagging, run date for weekly jobs), exact request params, full response, the app's result, latency, error, `VERCEL_GIT_COMMIT_SHA`
@@ -183,7 +190,7 @@ npm run eval:pick -- <run>   # then eval:summarize, eval:judge (or eval:agents),
 - **Tagging**: `MAX_TAGS` and rules in `SYSTEM_PROMPT` in `api/_lib/tagging.ts`; taxonomy rules in `SYSTEM_PROMPT` in `api/_lib/rebalance.ts`
 - **Reading models**: `SUMMARY_MODEL` in `api/_lib/summarize.ts` (document summaries), `PLAN_MODEL` in `api/_lib/rebalance.ts`, `GLOSSARY_MODEL` / `BRIEF_MODEL` in `api/_lib/glossary.ts`, `SUMMARY_MODEL` in `api/_lib/summary.ts` (weekly email)
 - **Chat rate limits**: `perIpLimit` / `overallLimit` in `api/chat.ts`
-- **Likes**: `SYSTEM_PROMPT` / `SPLIT_PROMPT` in `api/_lib/likes-enrich.ts`; MCP tool descriptions in `api/_lib/likes-mcp.ts`; email in `api/_lib/likes-digest.ts`
+- **Likes**: `SYSTEM_PROMPT` / `SPLIT_PROMPT` in `api/_lib/likes-enrich.ts`; MCP tools and instructions in `api/_lib/mcp.ts`; email in `api/_lib/likes-digest.ts`
 
 ## Follow-up work
 - `docs/plans/align-document-summaries.md`: evaluate document summaries (faithfulness, coverage, length, usefulness) with calibrated LLM judges, then pick or distill the summarizer. Not started; read it before changing `SUMMARY_MODEL` or the summary prompt

@@ -31,6 +31,16 @@ export function getSql(): Promise<Sql> | undefined {
 }
 
 /**
+ * ILIKE patterns for each word of a search, so a row matches when every word
+ * appears somewhere in it
+ */
+export const wordPatterns = (query: string) =>
+  query
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => `%${word.replace(/[\\%_]/g, '\\$&')}%`);
+
+/**
  * Like getSql, for callers that can't work without the database
  */
 export async function requireSql(): Promise<Sql> {

@@ -20,20 +20,16 @@
       "destination": "/index.html"
     },
     {
-      "source": "/api/likes/mcp",
-      "destination": "/api/likes?op=mcp"
-    },
-    {
-      "source": "/api/likes/oauth/:step",
-      "destination": "/api/likes?op=oauth-:step"
+      "source": "/api/oauth/:step",
+      "destination": "/api/mcp?op=oauth-:step"
     },
     {
       "source": "/.well-known/oauth-protected-resource/:path*",
-      "destination": "/api/likes?op=oauth-resource"
+      "destination": "/api/mcp?op=oauth-resource"
     },
     {
       "source": "/.well-known/oauth-authorization-server/:path*",
-      "destination": "/api/likes?op=oauth-server"
+      "destination": "/api/mcp?op=oauth-server"
     }
   ],
   "crons": [

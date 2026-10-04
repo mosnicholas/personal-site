@@ -111,7 +111,8 @@ ORDER BY r.created_at, title;
 1. Set `PERSONAL_SITE_OWNER_KEY` (above). It's the password on `/likes`, and signs the tokens Claude uses; changing it signs everything out
 2. Vercel → Storage → Create → Blob, with **private** access, connected to the project. On Vercel it authenticates with the project's OIDC token; `BLOB_READ_WRITE_TOKEN` is only needed to run it locally
 3. Redeploy, open `/likes` and sign in with the key
-4. To save from Claude: Settings → Connectors → Add custom connector → `https://nimo.fyi/api/likes/mcp`, then type the key on the page it opens. Claude can then save links and notes ("save this to my likes"), import pasted notes, and search. For a photo in a chat, Claude saves a note describing it; upload the photo itself on `/likes`
+4. Connect Claude: Settings → Connectors → Add custom connector → `https://nimo.fyi/api/mcp`, then type the key on the page it opens. Claude can then save likes, search likes and reading, and read any of them in full. Claude can't hand a chat's photo to a tool, so for a photo it saves a note describing it; upload the photo itself on `/likes`
+5. Connect ChatGPT (needs developer mode: Settings → Apps & Connectors → Advanced): create a connector with the same URL and OAuth, then type the key. ChatGPT can pass photos attached in a chat, so "save this" with a photo stores the photo
 
 New likes are organized within a minute of saving; `/api/likes?op=process` (daily, 11am UTC) picks up anything left over, and `/api/likes?op=digest` (1st of the month, noon UTC) sends the email. Both take the cron secret:
 
@@ -200,7 +201,8 @@ personal-site/
 │   ├── reading-synthesis.ts # Monthly 90-day synthesis cron (Opus 5.5)
 │   ├── update-prices.ts     # Daily model price check (no LLM)
 │   ├── reading-graph.ts     # Public data for /reading
-│   ├── likes.ts             # /likes API, its MCP server and OAuth, likes crons (Haiku 4.5)
+│   ├── likes.ts             # /likes API and likes crons (Haiku 4.5)
+│   ├── mcp.ts               # MCP server for Claude/ChatGPT (likes + reading) and its OAuth
 │   └── _lib/                # Shared helpers (underscore = not deployed as functions)
 ├── src/                     # React app
 ├── index.html               # Vite entry
@@ -208,7 +210,7 @@ personal-site/
 └── package.json
 ```
 
-All functions use the Web standard `export default { fetch(request) }` signature. Only `/api/likes` uses Vercel packages: `@vercel/blob` for photos and `@vercel/functions` to keep organizing likes after it responds.
+All functions use the Web standard `export default { fetch(request) }` signature. Only `/api/likes` (and `/api/mcp`, which saves likes) uses Vercel packages: `@vercel/blob` for photos and `@vercel/functions` to keep organizing likes after it responds.
 
 ## Troubleshooting
 

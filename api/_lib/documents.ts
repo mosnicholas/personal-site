@@ -10,7 +10,7 @@
  * skip the mirror when DATABASE_URL isn't set.
  */
 
-import { getSql, requireSql } from './db.js';
+import { getSql, requireSql, wordPatterns } from './db.js';
 import { type Article, articleTagNames } from './readwise.js';
 
 export interface OurSummary {
@@ -294,6 +294,86 @@ export async function tagsInUse(): Promise<TagInUse[] | undefined> {
     console.warn('Could not load tags from the mirror:', error);
     return undefined;
   }
+}
+
+/** A saved document as the MCP server shows it */
+export interface SavedDocument {
+  id: string;
+  title: string;
+  author: string | null;
+  site: string | null;
+  /** The original article, else Reader's copy */
+  url: string | null;
+  /** YYYY-MM-DD */
+  saved: string | null;
+  /** new, later, shortlist or archive */
+  location: string | null;
+  /** How far I got, 0-1 */
+  progress: number;
+  tags: string[];
+  /** Ours, or Readwise's when we have none */
+  summary: string | null;
+}
+
+const savedDocument = (row: Record<string, unknown>): SavedDocument => ({
+  id: String(row.id),
+  title: String(row.title),
+  author: (row.author as string | null) ?? null,
+  site: (row.site_name as string | null) ?? null,
+  url: (row.url as string | null) ?? null,
+  saved: (row.saved as string | null) ?? null,
+  location: (row.location as string | null) ?? null,
+  progress: Number(row.reading_progress),
+  tags: row.tags as string[],
+  summary: (row.summary as string | null) ?? null,
+});
+
+/**
+ * Saved documents (not the feed) matching every word of `query` in their
+ * title, author, site, tags or summary, newest first; `since` is a date
+ */
+export async function searchDocuments({
+  query = '',
+  since,
+  limit = 20,
+}: {
+  query?: string;
+  since?: string;
+  limit?: number;
+}): Promise<SavedDocument[]> {
+  const sql = await requireSql();
+  const rows = await sql`
+    SELECT id, title, author, site_name, coalesce(source_url, url) AS url,
+      saved_at::date::text AS saved, location, reading_progress, tags,
+      coalesce(summary, readwise_summary) AS summary
+    FROM documents
+    WHERE location IS DISTINCT FROM 'feed'
+      AND (${since ?? null}::date IS NULL OR saved_at >= ${since ?? null}::date)
+      AND NOT EXISTS (
+        SELECT 1 FROM unnest(${wordPatterns(query)}::text[]) AS pattern
+        WHERE concat_ws(' ', title, author, site_name, summary,
+          readwise_summary, array_to_string(tags, ' ')) NOT ILIKE pattern)
+    ORDER BY saved_at DESC NULLS LAST
+    LIMIT ${limit}`;
+  return rows.map(savedDocument);
+}
+
+/** One saved document, with its full text when we have it */
+export async function getSavedDocument(
+  id: string,
+): Promise<(SavedDocument & { text: string | null }) | undefined> {
+  const sql = await requireSql();
+  const [row] = await sql`
+    SELECT d.id, d.title, d.author, d.site_name,
+      coalesce(d.source_url, d.url) AS url, d.saved_at::date::text AS saved,
+      d.location, d.reading_progress, d.tags,
+      coalesce(d.summary, d.readwise_summary) AS summary, t.text
+    FROM documents d
+    LEFT JOIN document_texts t ON t.id = d.id
+    WHERE d.id = ${id} AND d.location IS DISTINCT FROM 'feed'`;
+  return row
+    ? { ...savedDocument(row), text: (row.text as string | null) ?? null }
+    : undefined;
 }
 
 export async function getSyncState<T>(name: string): Promise<T | undefined> {

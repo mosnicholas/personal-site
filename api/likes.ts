@@ -1,24 +1,12 @@
 import type { LikePatch } from '../shared/likes.js';
 import { rejectUnauthorizedCron } from './_lib/auth.js';
-import {
-  authorizationServer,
-  authorize,
-  isOwner,
-  login,
-  logout,
-  ownerKeyIsSet,
-  protectedResource,
-  registerClient,
-  resourceMetadataUrl,
-  token,
-} from './_lib/likes-auth.js';
+import { isOwner, login, logout, ownerKeyIsSet } from './_lib/owner-auth.js';
 import { sendLikesDigest } from './_lib/likes-digest.js';
 import {
   importNotes,
   processLikes,
   processLikesLater,
 } from './_lib/likes-enrich.js';
-import { handleMcp } from './_lib/likes-mcp.js';
 import {
   deleteLike,
   LikeInputError,
@@ -30,17 +18,15 @@ import {
 } from './_lib/likes.js';
 
 /**
- * The likes collection (/likes), its MCP server, and the OAuth endpoints
- * Claude connects through. vercel.json rewrites the MCP and OAuth paths here
- * as `op`s. Everything except signing in, OAuth and the crons is for the
- * owner only (_lib/likes-auth.ts).
+ * The likes collection (/likes); Claude and ChatGPT reach it through the MCP
+ * server instead (api/mcp.ts). Everything except signing in and the crons is
+ * for the owner only (_lib/owner-auth.ts).
  *
  * - GET: every like, newest first; `?op=photo&id=` a like's photo
  * - POST: save a like, JSON `{ url, text, note }`, or a form that adds a `photo`
  * - POST `?op=import` `{ text }`: split pasted notes into likes
  * - PATCH `?id=` (a LikePatch), DELETE `?id=`, POST `?op=retry&id=`
  * - POST `?op=login` `{ key }`, POST `?op=logout`
- * - `?op=mcp`: the MCP server (_lib/likes-mcp.ts), at /api/likes/mcp
  * - Crons: `?op=process` (daily) enriches likes left waiting; `?op=digest`
  *   (monthly) emails a few old ones
  */
@@ -51,27 +37,15 @@ async function handle(request: Request): Promise<Response> {
   const id = params.get('id') ?? '';
   const { method } = request;
 
-  switch (op) {
-    case 'oauth-resource':
-      return protectedResource(request);
-    case 'oauth-server':
-      return authorizationServer(request);
-    case 'oauth-register':
-      return registerClient(request);
-    case 'oauth-authorize':
-      return authorize(request);
-    case 'oauth-token':
-      return token(request);
-    case 'process':
-    case 'digest':
-      return (
-        rejectUnauthorizedCron(request) ??
-        Response.json(
-          op === 'process'
-            ? { processed: await processLikes() }
-            : await sendLikesDigest(),
-        )
-      );
+  if (op === 'process' || op === 'digest') {
+    return (
+      rejectUnauthorizedCron(request) ??
+      Response.json(
+        op === 'process'
+          ? { processed: await processLikes() }
+          : await sendLikesDigest(),
+      )
+    );
   }
 
   if (!ownerKeyIsSet()) {
@@ -85,20 +59,10 @@ async function handle(request: Request): Promise<Response> {
   }
   if (op === 'logout') return logout();
   if (!isOwner(request)) {
-    return Response.json(
-      { error: 'Sign in first' },
-      {
-        status: 401,
-        headers: {
-          'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadataUrl(request)}"`,
-        },
-      },
-    );
+    return Response.json({ error: 'Sign in first' }, { status: 401 });
   }
 
   switch (op) {
-    case 'mcp':
-      return handleMcp(request);
     case 'photo': {
       const photo = await readPhoto(id);
       return photo
