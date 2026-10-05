@@ -286,6 +286,16 @@ const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
         claimed_at = NULL
       WHERE description = '' OR (image_url IS NULL AND photo IS NULL)`;
   },
+
+  // 5. The 27 likes still without a picture after that (mostly clothing
+  // brands, whose stores block servers or whose preview image is a logo or
+  // missing) are queued again, now that photos on source pages count too
+  async (sql) => {
+    await sql`
+      UPDATE likes SET status = 'pending', attempts = 0, error = NULL,
+        claimed_at = NULL
+      WHERE image_url IS NULL AND photo IS NULL`;
+  },
 ];
 
 async function migrate(sql: Sql): Promise<void> {

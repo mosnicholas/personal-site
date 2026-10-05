@@ -115,6 +115,28 @@ interface Page {
 // Image types Claude reads
 const PICTURE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
+// Pictures shown to Haiku: files under 5 MB once base64-encoded (the API's
+// limit), at least a few KB (smaller ones are icons, flags and spacers), and
+// at most this many and these many bytes in one request
+const MAX_PICTURE_BYTES = 3_700_000;
+const MIN_PICTURE_BYTES = 3_000;
+const MAX_PICTURES = 16;
+const MAX_REQUEST_PICTURE_BYTES = 15_000_000;
+
+/** An <img>'s biggest version: the largest in its srcset, else its src */
+function imgSource(tag: string): string | undefined {
+  const attribute = (name: string) =>
+    tag.match(new RegExp(`\\s${name}\\s*=\\s*["']([^"']+)`, 'i'))?.[1];
+  const largest = attribute('srcset')
+    ?.split(/,\s+/)
+    .map((entry) => {
+      const [url, size = '1x'] = entry.trim().split(/\s+/);
+      return { url, size: parseFloat(size) || 0 };
+    })
+    .sort((a, b) => b.size - a.size)[0]?.url;
+  return largest ?? attribute('src');
+}
+
 interface Picture {
   url: string;
   type: Anthropic.Base64ImageSource['media_type'];
@@ -172,8 +194,9 @@ async function fetchPage(url: string): Promise<Page | undefined> {
       }
     };
     const preview = meta.get('og:image') ?? meta.get('twitter:image');
-    const images = [...html.matchAll(/<img\b[^>]*?\ssrc\s*=\s*["']([^"']+)/gi)]
-      .map(([, src]) => absolute(src))
+    const images = [...html.matchAll(/<img\b[^>]*>/gi)]
+      .map(([tag]) => imgSource(tag))
+      .map((src) => (src ? absolute(src) : null))
       .filter((url): url is string => url !== null);
     return {
       title:
@@ -189,7 +212,7 @@ async function fetchPage(url: string): Promise<Page | undefined> {
   }
 }
 
-/** An image, if it loads and is a kind Claude reads (at most 5 MB) */
+/** An image, if it loads, is a kind Claude reads, and isn't too big */
 async function loadPicture(url: string): Promise<Picture | undefined> {
   try {
     const response = await fetch(url, {
@@ -201,7 +224,7 @@ async function loadPicture(url: string): Promise<Picture | undefined> {
       return undefined;
     }
     const data = Buffer.from(await response.arrayBuffer());
-    return data.length < 5_000_000
+    return data.length <= MAX_PICTURE_BYTES
       ? { url, type: type as Picture['type'], data }
       : undefined;
   } catch {
@@ -348,9 +371,8 @@ async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
 }
 
 /**
- * The like's image: the sharpest picture that shows it, among the linked
- * page's preview image and first few images and the sources' preview
- * images. A preview image can be the site's own picture, a page that moved,
+ * The like's image: the sharpest picture that shows it, among the preview
+ * images and first few images of the linked page and the source pages. A preview image can be the site's own picture, a page that moved,
  * or another version, so Haiku says which pictures show it; of those, the
  * biggest file is taken to be the sharpest (some sites' are thumbnails)
  */
@@ -362,14 +384,26 @@ async function pickImage(
   const sourcePages = await Promise.all(
     details.sources.slice(0, 5).map((source) => fetchPage(source.url)),
   );
+  // Most likely to show it first: many stores' preview image is a logo or
+  // missing, but their pages have product photos
   const urls = [
     page?.previewImage,
     ...(page?.images ?? []),
     ...sourcePages.map((sourcePage) => sourcePage?.previewImage),
+    ...sourcePages.flatMap(
+      (sourcePage) => sourcePage?.images.slice(0, 4) ?? [],
+    ),
   ].filter((url): url is string => Boolean(url));
-  const pictures = (
-    await Promise.all([...new Set(urls)].map(loadPicture))
-  ).filter((picture) => picture !== undefined);
+  const loaded = await Promise.all([...new Set(urls)].map(loadPicture));
+  const pictures: Picture[] = [];
+  let bytes = 0;
+  for (const picture of loaded) {
+    if (!picture || picture.data.length < MIN_PICTURE_BYTES) continue;
+    if (bytes + picture.data.length > MAX_REQUEST_PICTURE_BYTES) continue;
+    pictures.push(picture);
+    bytes += picture.data.length;
+    if (pictures.length === MAX_PICTURES) break;
+  }
   if (pictures.length === 0) return page?.previewImage ?? null;
 
   const request = {
