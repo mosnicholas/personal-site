@@ -282,7 +282,10 @@ export async function claimLikes(limit: number): Promise<Like[]> {
   return rows.map(likeFromRow);
 }
 
-/** Saves what enrichment found, keeping anything I set */
+/**
+ * Saves what enrichment found, keeping anything I set, and an image or
+ * sources found before ("Organize again" clears those first)
+ */
 export async function finishLike(id: string, details: LikeDetails) {
   const sql = await requireSql();
   await sql`
@@ -292,8 +295,9 @@ export async function finishLike(id: string, details: LikeDetails) {
         ELSE description END,
       category = coalesce(category, ${details.category}),
       tags = CASE WHEN tags = '{}' THEN ${details.tags}::text[] ELSE tags END,
-      image_url = ${details.imageUrl},
-      sources = ${JSON.stringify(details.sources)}::jsonb,
+      image_url = coalesce(image_url, ${details.imageUrl}),
+      sources = CASE WHEN sources = '[]' THEN ${JSON.stringify(details.sources)}::jsonb
+        ELSE sources END,
       status = 'ready', error = NULL, claimed_at = NULL
     WHERE id = ${id}`;
 }

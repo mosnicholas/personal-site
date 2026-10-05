@@ -270,6 +270,22 @@ const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
       ALTER TABLE model_prices
         ADD COLUMN IF NOT EXISTS web_search numeric NOT NULL DEFAULT 10`;
   },
+
+  // 4. Likes backfilled over MCP skipped Haiku because Claude filled in
+  // every field, with filler descriptions ("Uyuni Bolivia. Saved under
+  // Places to travel to."), so they got no sources or picture. Their
+  // descriptions and tags are cleared for Haiku to write (titles and
+  // categories stay; where they were saved from is in their text), and
+  // they and any other like without a picture are queued again
+  async (sql) => {
+    await sql`
+      UPDATE likes SET description = '', tags = '{}'
+      WHERE source = 'mcp' AND description LIKE '%Saved under%'`;
+    await sql`
+      UPDATE likes SET status = 'pending', attempts = 0, error = NULL,
+        claimed_at = NULL
+      WHERE description = '' OR (image_url IS NULL AND photo IS NULL)`;
+  },
 ];
 
 async function migrate(sql: Sql): Promise<void> {
