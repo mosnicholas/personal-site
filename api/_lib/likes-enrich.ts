@@ -112,8 +112,22 @@ interface Page {
   images: string[];
 }
 
-// Image types Claude reads
-const PICTURE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+/**
+ * The image type Claude reads that the file is, from its first bytes: some
+ * servers send PNGs as image/jpeg or JPEGs as image/jpg, and the API
+ * rejects a request whose stated type is wrong
+ */
+function pictureType(data: Buffer): Picture['type'] | undefined {
+  const starts = (bytes: number[], at = 0) =>
+    bytes.every((byte, i) => data[at + i] === byte);
+  if (starts([0xff, 0xd8, 0xff])) return 'image/jpeg';
+  if (starts([0x89, 0x50, 0x4e, 0x47])) return 'image/png';
+  if (starts([0x47, 0x49, 0x46, 0x38])) return 'image/gif';
+  if (starts([0x52, 0x49, 0x46, 0x46]) && starts([0x57, 0x45, 0x42, 0x50], 8)) {
+    return 'image/webp';
+  }
+  return undefined;
+}
 
 // Pictures shown to Haiku: files under 5 MB once base64-encoded (the API's
 // limit), at least a few KB (smaller ones are icons, flags and spacers), and
@@ -219,13 +233,11 @@ async function loadPicture(url: string): Promise<Picture | undefined> {
       headers: { 'User-Agent': USER_AGENT },
       signal: AbortSignal.timeout(10_000),
     });
-    const type = response.headers.get('content-type')?.split(';')[0].trim();
-    if (!response.ok || !type || !PICTURE_TYPES.includes(type)) {
-      return undefined;
-    }
+    if (!response.ok) return undefined;
     const data = Buffer.from(await response.arrayBuffer());
-    return data.length <= MAX_PICTURE_BYTES
-      ? { url, type: type as Picture['type'], data }
+    const type = pictureType(data);
+    return type && data.length <= MAX_PICTURE_BYTES
+      ? { url, type, data }
       : undefined;
   } catch {
     return undefined;
@@ -460,10 +472,13 @@ async function pickImage(
       return pictures.filter((_, i) => numbers.includes(i + 1));
     },
   ).catch((error: unknown) => {
-    // An image the API won't take shouldn't cost the like its details
+    // An image the API won't take shouldn't cost the like its details. Most
+    // candidates are just pictures on a page, so with no pick there's only
+    // the linked page's own preview image
     console.error(`Could not pick an image for like ${like.id}:`, error);
-    return pictures;
+    return undefined;
   });
+  if (!shown) return page?.previewImage ?? null;
   return shown.sort((a, b) => b.data.length - a.data.length)[0]?.url ?? null;
 }
 
