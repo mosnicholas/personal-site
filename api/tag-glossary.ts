@@ -1,5 +1,6 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
 import { defineTags, writeBriefs } from './_lib/glossary.js';
+import { loggedCron } from './_lib/traces.js';
 
 /**
  * Tag Glossary Cron Handler
@@ -16,7 +17,7 @@ import { defineTags, writeBriefs } from './_lib/glossary.js';
 // Vercel stops functions at 300s; a brief in flight can take a minute
 const TIME_BUDGET_MS = 220_000;
 
-export default {
+export default loggedCron('tag-glossary', {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'GET') {
       return Response.json({ error: 'Method not allowed' }, { status: 405 });
@@ -52,4 +53,4 @@ export default {
       );
     }
   },
-};
+});

@@ -1,5 +1,6 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
 import { summarizeMissing, syncDocuments } from './_lib/sync.js';
+import { loggedCron } from './_lib/traces.js';
 
 /**
  * Library Sync Cron Handler
@@ -24,7 +25,7 @@ const TIME_BUDGET_MS = 220_000;
 // Leave most of the budget for summaries once the listing is caught up
 const LISTING_SHARE = 0.5;
 
-export default {
+export default loggedCron('sync-documents', {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'GET') {
       return Response.json({ error: 'Method not allowed' }, { status: 405 });
@@ -67,4 +68,4 @@ export default {
       );
     }
   },
-};
+});

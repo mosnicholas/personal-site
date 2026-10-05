@@ -8,6 +8,7 @@ import {
   prepareDocuments,
   SYNTHESIS_TEXT_BUDGET_CHARS,
 } from './_lib/synthesis.js';
+import { loggedCron } from './_lib/traces.js';
 
 /**
  * Reading Synthesis Cron Handler
@@ -28,7 +29,7 @@ const DEFAULT_DAYS = 90;
 const MAX_DAYS = 183;
 const LIBRARY_LOCATIONS: Location[] = ['new', 'later', 'shortlist', 'archive'];
 
-export default {
+export default loggedCron('reading-synthesis', {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'GET') {
       return Response.json({ error: 'Method not allowed' }, { status: 405 });
@@ -157,4 +158,4 @@ export default {
       );
     }
   },
-};
+});

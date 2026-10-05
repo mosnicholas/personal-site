@@ -6,7 +6,7 @@ import {
   generateWeeklySummary,
   WEEKLY_TEXT_BUDGET_CHARS,
 } from './_lib/summary.js';
-import { describeTraceLog } from './_lib/traces.js';
+import { describeTraceLog, loggedCron } from './_lib/traces.js';
 
 /**
  * Weekly Reading Summary Cron Handler
@@ -27,7 +27,7 @@ const MAX_DAYS = 31;
 const errorResponse = (error: string, status: number, details?: string) =>
   Response.json({ error, details }, { status });
 
-export default {
+export default loggedCron('weekly-summary', {
   async fetch(request: Request): Promise<Response> {
     // Vercel cron triggers via GET
     if (request.method !== 'GET') {
@@ -160,4 +160,4 @@ export default {
       );
     }
   },
-};
+});

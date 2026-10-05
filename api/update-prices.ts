@@ -10,6 +10,7 @@ import {
   type PriceCheckState,
   PRICING_URL,
 } from './_lib/prices-check.js';
+import { loggedCron } from './_lib/traces.js';
 
 /**
  * Model Price Check Cron Handler
@@ -97,7 +98,7 @@ ${notes.length > 0 ? `<p style="color: #666">${escapeHtml(notes.join(' '))}</p>`
   return { subject, html };
 }
 
-export default {
+export default loggedCron('update-prices', {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'GET') {
       return Response.json({ error: 'Method not allowed' }, { status: 405 });
@@ -163,4 +164,4 @@ export default {
       );
     }
   },
-};
+});

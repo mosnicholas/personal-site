@@ -1,5 +1,6 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
 import { rebalanceTags } from './_lib/rebalance.js';
+import { loggedCron } from './_lib/traces.js';
 
 /**
  * Weekly Tag Rebalance Cron Handler
@@ -19,7 +20,7 @@ const MAX_SWEEP_DAYS = 3650;
 // Vercel stops functions at 300s; leave time to write the updates
 const TIME_BUDGET_MS = 220_000;
 
-export default {
+export default loggedCron('rebalance-tags', {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'GET') {
       return Response.json({ error: 'Method not allowed' }, { status: 405 });
@@ -51,4 +52,4 @@ export default {
       );
     }
   },
-};
+});

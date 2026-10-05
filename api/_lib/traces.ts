@@ -7,6 +7,7 @@
  * DATABASE_URL, or if a write fails, it logs and moves on.
  */
 
+import { rejectUnauthorizedCron } from './auth.js';
 import { getSql } from './db.js';
 import { PRICE_CHECK_STATE, type PriceCheckState } from './prices-check.js';
 import { loadPrices, priceAt, tokenUsage, type Usage } from './pricing.js';
@@ -43,7 +44,8 @@ let warnedMissingUrl = false;
 const toJson = (value: unknown) =>
   value === undefined ? null : JSON.stringify(value);
 
-export type EventKind = 'readwise_save' | 'readwise_webhook';
+export type EventKind =
+  'cron_run' | 'email' | 'mcp_call' | 'readwise_save' | 'readwise_webhook';
 
 /**
  * Records something that happened outside an LLM call in `event_log`, e.g. a
@@ -70,6 +72,70 @@ export async function logEvent(event: {
   } catch (error) {
     console.warn('Could not log the event:', error);
   }
+}
+
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * A cron endpoint whose runs are logged as `cron_run`: one row when it
+ * starts and one with its status, what it returned and how long it took. A
+ * start with no finish is a run that timed out
+ */
+export function loggedCron(
+  job: string,
+  handler: { fetch(request: Request): Promise<Response> },
+) {
+  return {
+    async fetch(request: Request): Promise<Response> {
+      const started = Date.now();
+      const query = new URL(request.url).search || undefined;
+      const log = (detail: Record<string, unknown>, error?: string) =>
+        logEvent({
+          kind: 'cron_run',
+          subjectId: job,
+          detail: { query, ...detail },
+          error,
+        });
+      // Not a run, so not logged; a missing CRON_SECRET (500) is logged,
+      // since then every run fails
+      if (
+        request.method !== 'GET' ||
+        rejectUnauthorizedCron(request)?.status === 401
+      ) {
+        return handler.fetch(request);
+      }
+      await log({ outcome: 'started' });
+
+      let response: Response;
+      try {
+        response = await handler.fetch(request);
+      } catch (error) {
+        await log(
+          { outcome: 'finished', status: 500, ms: Date.now() - started },
+          errorMessage(error),
+        );
+        throw error;
+      }
+      const result = (await response
+        .clone()
+        .json()
+        .catch(() => undefined)) as Record<string, unknown> | undefined;
+      await log(
+        {
+          outcome: 'finished',
+          status: response.status,
+          ms: Date.now() - started,
+          result,
+        },
+        response.ok
+          ? undefined
+          : [result?.error, result?.details].filter(Boolean).join(': ') ||
+              `HTTP ${response.status}`,
+      );
+      return response;
+    },
+  };
 }
 
 export async function recordTrace(trace: Trace): Promise<void> {

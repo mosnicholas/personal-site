@@ -17,6 +17,7 @@ import {
   saveLike,
   updateLike,
 } from './_lib/likes.js';
+import { loggedCron } from './_lib/traces.js';
 
 /**
  * The likes collection (/likes); Claude and ChatGPT reach it through the MCP
@@ -41,14 +42,15 @@ async function handle(request: Request): Promise<Response> {
   const { method } = request;
 
   if (op === 'process' || op === 'digest') {
-    return (
-      rejectUnauthorizedCron(request) ??
-      Response.json(
-        op === 'process'
-          ? { processed: await processLikes() }
-          : await sendLikesDigest(),
-      )
-    );
+    return loggedCron(`likes-${op}`, {
+      fetch: async () =>
+        rejectUnauthorizedCron(request) ??
+        Response.json(
+          op === 'process'
+            ? { processed: await processLikes() }
+            : await sendLikesDigest(),
+        ),
+    }).fetch(request);
   }
 
   if (!ownerKeyIsSet()) {

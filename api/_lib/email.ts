@@ -3,6 +3,8 @@
  * Documentation: https://resend.com/docs
  */
 
+import { logEvent } from './traces.js';
+
 const RESEND_API_BASE = 'https://api.resend.com';
 
 interface SendEmailPayload {
@@ -47,9 +49,31 @@ export const escapeHtml = (text: string) =>
 
 /**
  * Send a reading email (weekly summary, synthesis) to the reader, with an
- * optional small-print `footer`
+ * optional small-print `footer`. Each send is logged with Resend's id, or the
+ * error
  */
-export async function sendReadingEmail({
+export async function sendReadingEmail(email: {
+  fromName: string;
+  subject: string;
+  html: string;
+  footer?: string;
+}): Promise<{ id: string }> {
+  const detail = { from: email.fromName, subject: email.subject };
+  try {
+    const sent = await send(email);
+    await logEvent({ kind: 'email', subjectId: sent.id, detail });
+    return sent;
+  } catch (error) {
+    await logEvent({
+      kind: 'email',
+      detail,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+async function send({
   fromName,
   subject,
   html,

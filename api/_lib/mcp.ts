@@ -25,6 +25,7 @@ import {
   searchLikes,
   updateLike,
 } from './likes.js';
+import { logEvent } from './traces.js';
 
 const INSTRUCTIONS = `This is nimo's (Nicholas Moschopoulos's) own data. Likes are things he saved because he likes them: products, places, links, ideas, often with a note on why. Reading is what he saved to Readwise Reader, each with a summary and usually the full text. Search to find things, then get one for all of it.`;
 
@@ -282,18 +283,61 @@ const TOOLS: Tool[] = [
   },
 ];
 
+/**
+ * What a tool returned, in brief for the log: counts of results and the ids
+ * and titles of single items, not their text
+ */
+function inBrief(content: Content[]) {
+  return content.map((block) => {
+    if (block.type === 'image') return { image: block.mimeType };
+    try {
+      const value = JSON.parse(block.text) as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.entries(value)
+          .filter(
+            ([key, field]) =>
+              Array.isArray(field) ||
+              ['id', 'source', 'title', 'status'].includes(key),
+          )
+          .map(([key, field]) => [
+            key,
+            Array.isArray(field) ? field.length : field,
+          ]),
+      );
+    } catch {
+      return { text: block.text.slice(0, 300) };
+    }
+  });
+}
+
 async function callTool(
   name: unknown,
   args: Record<string, unknown>,
   site: string,
+  client: string | null,
 ) {
   const tool = TOOLS.find((candidate) => candidate.name === name);
   if (!tool) throw new RpcError(-32602, `Unknown tool: ${String(name)}`);
+  const started = Date.now();
+  // Each call is logged: which app, what it asked, what came back
+  const log = (result: unknown, error?: string) =>
+    logEvent({
+      kind: 'mcp_call',
+      subjectId: tool.name,
+      detail: { client, args, result, ms: Date.now() - started },
+      error,
+    });
   try {
-    return { content: await tool.run(args, site) };
+    const content = await tool.run(args, site);
+    await log(inBrief(content));
+    return { content };
   } catch (error) {
     const told = error instanceof ToolError || error instanceof LikeInputError;
     if (!told) console.error(`MCP tool ${tool.name} failed:`, error);
+    await log(
+      undefined,
+      error instanceof Error ? error.message : String(error),
+    );
     return {
       content: [
         {
@@ -310,6 +354,7 @@ async function answer(
   method: unknown,
   params: Record<string, unknown>,
   site: string,
+  client: string | null,
 ) {
   switch (method) {
     case 'initialize':
@@ -339,6 +384,7 @@ async function answer(
         params.name,
         (params.arguments ?? {}) as Record<string, unknown>,
         site,
+        client,
       );
     default:
       throw new RpcError(-32601, `Unknown method: ${String(method)}`);
@@ -374,6 +420,8 @@ export async function handleMcp(request: Request): Promise<Response> {
       message.method,
       message.params ?? {},
       new URL(request.url).origin,
+      // Which app is calling, e.g. Claude Code or ChatGPT
+      request.headers.get('user-agent'),
     );
     return Response.json({ jsonrpc: '2.0', id: message.id, result });
   } catch (error) {
