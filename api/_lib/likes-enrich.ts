@@ -26,7 +26,7 @@ import type { Like } from '../../shared/likes.js';
 
 const MODEL = 'claude-haiku-4-5';
 
-const IDENTIFY_PROMPT = `Someone saved this to their collection of things they like: links, notes and photos they keep so they can find them again and remember what each one was. Say exactly what it is: brand and model for a product, the name of a place or work. When that isn't clear from what they saved, like a product in a photo or a place named in a note, search the web to pin it down. Their text, note and photo show what caught their eye: when they single out one version, like a color, a material, or one of several models on a page, say which.`;
+const IDENTIFY_PROMPT = `Someone saved this to their collection of things they like: links, notes and photos they keep so they can find them again and remember what each one was. Search the web for it and say exactly what it is: brand and model for a product, the name of a place or work. The pages you find also give it its picture in the collection, so search even when you already know what it is. Their text, note and photo show what caught their eye: when they single out one version, like a color, a material, or one of several models on a page, say which.`;
 
 const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. From what they saved and what it turned out to be, fill in the details: the title and description let them recognize it at a glance, and the category and tags group it with similar things when they browse. When they singled out one version of something, the details are about that version. Reuse one of the collection's categories when one fits.`;
 
@@ -436,51 +436,43 @@ async function pickImage(
 async function enrichLike(like: Like): Promise<void> {
   try {
     const page = like.url ? await fetchPage(like.url) : undefined;
-    // Saved with everything filled in (Claude often knows what it is), so
-    // only the preview image is missing
-    const complete =
-      like.title && like.description && like.category && like.tags.length;
-    let details: Omit<LikeDetails, 'imageUrl'>;
-    if (complete) {
-      details = { ...like, category: like.category!, sources: [] };
-    } else {
-      const photo = like.photoUrl ? await photoBytes(like.id) : undefined;
-      const save = {
-        url: like.url,
-        title: like.title || undefined,
-        text: like.text || undefined,
-        note: like.note || undefined,
-        page: page && {
-          title: page.title,
-          description: page.description,
-          text: page.text,
+    const photo = like.photoUrl ? await photoBytes(like.id) : undefined;
+    // Haiku runs even when every field is filled in (Claude often knows what
+    // it is): its search finds the sources, and the pages that give the like
+    // its picture. finishLike keeps the fields that were set
+    const save = {
+      url: like.url,
+      title: like.title || undefined,
+      description: like.description || undefined,
+      text: like.text || undefined,
+      note: like.note || undefined,
+      page: page && {
+        title: page.title,
+        description: page.description,
+        text: page.text,
+      },
+    };
+    const { answer, results } = await identify(like, saveContent(save, photo));
+    const found = await organize(
+      like,
+      saveContent(
+        {
+          ...save,
+          what_it_is: answer || undefined,
+          search_results: results.size
+            ? [...results].map(([url, title]) => ({ url, title }))
+            : undefined,
         },
-      };
-      const { answer, results } = await identify(
-        like,
-        saveContent(save, photo),
-      );
-      const found = await organize(
-        like,
-        saveContent(
-          {
-            ...save,
-            what_it_is: answer || undefined,
-            search_results: results.size
-              ? [...results].map(([url, title]) => ({ url, title }))
-              : undefined,
-          },
-          photo,
-        ),
-      );
-      details = {
-        ...found,
-        // Only real search results, so a made-up URL can't become a source
-        sources: [...new Set(found.sources)]
-          .filter((url) => results.has(url))
-          .map((url) => ({ url, title: results.get(url)! })),
-      };
-    }
+        photo,
+      ),
+    );
+    const details = {
+      ...found,
+      // Only real search results, so a made-up URL can't become a source
+      sources: [...new Set(found.sources)]
+        .filter((url) => results.has(url))
+        .map((url) => ({ url, title: results.get(url)! })),
+    };
     const imageUrl = await pickImage(like, details, page);
     await finishLike(like.id, { ...details, imageUrl });
   } catch (error) {
