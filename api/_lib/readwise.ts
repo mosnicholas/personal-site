@@ -3,6 +3,8 @@
  * Documentation: https://readwise.io/reader_api
  */
 
+import { logEvent } from './traces.js';
+
 const READWISE_API_BASE = 'https://readwise.io/api/v3';
 const MAX_RATE_LIMIT_RETRIES = 3;
 
@@ -300,13 +302,30 @@ export async function bulkUpdateTags(
 }
 
 /**
- * Save a new document to Readwise Reader
+ * Save a new document to Readwise Reader. Each save is logged, so the
+ * webhook delivery it should lead to can be checked against it
  */
 export async function saveDocument(
   payload: SaveDocumentPayload,
 ): Promise<{ id: string; url: string }> {
-  return makeRequest('/save/', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  const detail = {
+    url: payload.url,
+    title: payload.title,
+    location: payload.location,
+  };
+  try {
+    const saved = await makeRequest<{ id: string; url: string }>('/save/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    await logEvent({ kind: 'readwise_save', subjectId: saved.id, detail });
+    return saved;
+  } catch (error) {
+    await logEvent({
+      kind: 'readwise_save',
+      detail,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }

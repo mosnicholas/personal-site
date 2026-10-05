@@ -15,6 +15,7 @@ import {
 } from './_lib/summarize.js';
 import { classifyDocument } from './_lib/tagging.js';
 import { getTaxonomy } from './_lib/taxonomy.js';
+import { logEvent } from './_lib/traces.js';
 
 /**
  * Readwise Reader Webhook Handler
@@ -57,11 +58,31 @@ export default {
       .json()
       .catch(() => null)) as WebhookPayload | null;
 
+    // Every delivery is logged, to check later which saves Readwise told us
+    // about and what came of them
+    const log = (
+      outcome: string,
+      extra: { detail?: Record<string, unknown>; error?: string } = {},
+    ) =>
+      logEvent({
+        kind: 'readwise_webhook',
+        subjectId: payload?.id,
+        detail: {
+          event_type: payload?.event_type,
+          title: payload?.title,
+          url: payload?.url,
+          outcome,
+          ...extra.detail,
+        },
+        error: extra.error,
+      });
+
     // Only tag new documents. Writing tags triggers `tags_updated`, so
     // reacting to other events could loop forever. Skipping does nothing, so
     // it needs no secret. That includes bodies that aren't JSON events, like
     // Readwise's "Test Endpoint" request, which must get a 2xx.
     if (!payload?.event_type?.endsWith('document.created')) {
+      await log('skipped');
       return Response.json({ skipped: true, eventType: payload?.event_type });
     }
 
@@ -71,6 +92,7 @@ export default {
     const expectedSecret = process.env.READWISE_WEBHOOK_SECRET;
     if (!expectedSecret) {
       console.warn('READWISE_WEBHOOK_SECRET is not set - ignoring webhook');
+      await log('no secret set');
       return Response.json({
         skipped: true,
         reason: 'READWISE_WEBHOOK_SECRET is not set',
@@ -83,10 +105,12 @@ export default {
       request.headers.get('x-webhook-secret') ??
       request.headers.get('authorization')?.replace(/^Bearer /, '');
     if (!secretsMatch(providedSecret, expectedSecret)) {
+      await log('unauthorized');
       return errorResponse('Unauthorized - invalid webhook secret', 401);
     }
 
     if (!payload.id || !payload.url || !payload.title) {
+      await log('missing fields');
       return errorResponse(
         'Missing required fields',
         400,
@@ -159,10 +183,20 @@ export default {
         (dbError: unknown) => console.warn('Could not save the tags:', dbError),
       );
       console.log(`Tagged ${payload.id}${ours ? ' (summarized)' : ''}:`, tags);
+      await log('tagged', {
+        detail: {
+          location: article?.location,
+          summarized: Boolean(ours),
+          tags,
+        },
+      });
 
       return Response.json({ success: true, documentId: payload.id, tags });
     } catch (error) {
       console.error('Error processing webhook:', error);
+      await log('failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return errorResponse(
         'Failed to process webhook',
         500,

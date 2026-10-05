@@ -2,7 +2,8 @@
  * Postgres (Neon's free plan via the Vercel Marketplace, which sets
  * DATABASE_URL). Holds the LLM trace log and model prices, a mirror of the
  * Readwise library with each saved document's text and our summary, the tag
- * glossary, and the likes collection (/likes).
+ * glossary, the likes collection (/likes), and a log of Readwise saves and
+ * webhook deliveries.
  * Tables are created on first use; MIGRATIONS (below) change existing ones,
  * once each.
  */
@@ -147,6 +148,18 @@ async function createSchema(sql: Sql): Promise<Sql> {
       source text NOT NULL DEFAULT 'web',
       created_at timestamptz NOT NULL DEFAULT now(),
       emailed_at timestamptz
+    )`;
+
+  // What happened outside LLM calls, to check later: saves to Readwise and
+  // every webhook delivery Readwise sends back (traces.ts, logEvent)
+  await sql`
+    CREATE TABLE IF NOT EXISTS event_log (
+      id bigserial PRIMARY KEY,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      kind text NOT NULL,
+      subject_id text,
+      detail jsonb NOT NULL DEFAULT '{}',
+      error text
     )`;
 
   // Resumable progress for long jobs, e.g. the library sync's page cursor

@@ -78,7 +78,7 @@ personal-site/
 │       ├── synthesis.ts       # Monthly/one-off synthesis prompt and request (Opus 5.5)
 │       ├── tagging.ts         # Haiku tagger: reuses existing tags, creates new ones when needed
 │       ├── taxonomy.ts        # `other` tag, tag normalization, cached tag list with counts and definitions
-│       └── traces.ts          # Saves every LLM call to Postgres (`llm_traces`)
+│       └── traces.ts          # Saves every LLM call to Postgres (`llm_traces`), and other events (`event_log`)
 ├── shared/likes.ts            # The Like type, shared by the API and /likes
 ├── scripts/eval/             # Summary eval: pick documents, write candidates, judge (API or Claude Code agents), report; see its README
 ├── vite.config.ts
@@ -138,6 +138,7 @@ personal-site/
 - Rebalance traces also store every applied change (`id`, `title`, `before` → `after` tags), which is the undo log, and `renames`, which later runs build on
 - Neon's free plan stops writes at 1 GB (all databases in the project) without warning, so the weekly email ends with `describeTraceLog()`: size and % of 1 GB (a warning from 80%), call count, the last 7 days' AI spend, a warning naming any model with no price, and a warning if the daily price check is failing or hasn't run for 3 days
 - Tracing never breaks the caller; without `DATABASE_URL` it's skipped. New LLM calls should be traced too
+- `event_log` (`logEvent` in `traces.ts`) records what happens outside LLM calls, so it can be checked later from the database: every save to Readwise (`readwise_save`, subject = the new document's id, or the error) and every webhook delivery (`readwise_webhook`: event type, title, outcome such as `tagged`, `skipped`, `unauthorized` or `failed`). A save whose id never shows up as a delivery means Readwise didn't send the webhook for it; it's not yet known whether Readwise sends webhooks for documents saved through its API (the weekly summary saves itself that way)
 
 ### API functions
 - All use the Web standard `export default { fetch(request: Request) }` signature - no `@vercel/node`

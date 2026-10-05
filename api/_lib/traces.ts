@@ -1,6 +1,7 @@
 /**
  * Persistent log of every LLM call, so models and prompts can be compared
  * later: the exact request, the full response, and what the app did with it.
+ * Also a log of other events worth checking later (`logEvent`).
  *
  * Stored in Postgres (see db.ts). Tracing never breaks the caller: without
  * DATABASE_URL, or if a write fails, it logs and moves on.
@@ -41,6 +42,35 @@ let warnedMissingUrl = false;
 
 const toJson = (value: unknown) =>
   value === undefined ? null : JSON.stringify(value);
+
+export type EventKind = 'readwise_save' | 'readwise_webhook';
+
+/**
+ * Records something that happened outside an LLM call in `event_log`, e.g. a
+ * save to Readwise, and whether Readwise's webhook then told us about it.
+ * Like tracing, it never breaks the caller
+ */
+export async function logEvent(event: {
+  kind: EventKind;
+  subjectId?: string | null;
+  detail?: Record<string, unknown>;
+  error?: string;
+}): Promise<void> {
+  try {
+    const sql = await getSql();
+    if (!sql) return;
+    await sql`
+      INSERT INTO event_log (kind, subject_id, detail, error)
+      VALUES (
+        ${event.kind},
+        ${event.subjectId ?? null},
+        ${toJson(event.detail ?? {})}::jsonb,
+        ${event.error ?? null}
+      )`;
+  } catch (error) {
+    console.warn('Could not log the event:', error);
+  }
+}
 
 export async function recordTrace(trace: Trace): Promise<void> {
   try {
