@@ -19,6 +19,8 @@ const matches = (like: Like, query: string) => {
     like.url,
     like.text,
     like.note,
+    like.list,
+    like.review,
     like.title,
     like.description,
     like.category,
@@ -196,7 +198,8 @@ const LikeCard = ({ like, onOpen }: { like: Like; onOpen: () => void }) => {
       )}
       <div className="likes-card-body">
         <p className="likes-meta">
-          {like.category ?? 'new'} · {savedDate(like)}
+          {like.category ?? 'new'}
+          {like.list && ` · ${like.list}`} · {savedDate(like)}
         </p>
         <h2>{likeTitle(like)}</h2>
         {like.note && <p>{like.note}</p>}
@@ -217,6 +220,7 @@ const LikesPage = () => {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
+  const [list, setList] = useState('');
   // ?item= opens a like, e.g. from the monthly email or Claude
   const [openId, setOpenId] = useState(() =>
     new URLSearchParams(window.location.search).get('item'),
@@ -271,8 +275,12 @@ const LikesPage = () => {
   const categories = [
     ...new Set(likes?.flatMap((like) => like.category ?? [])),
   ].sort();
+  const lists = [...new Set(likes?.flatMap((like) => like.list ?? []))].sort();
   const shown = likes?.filter(
-    (like) => (!category || like.category === category) && matches(like, query),
+    (like) =>
+      (!category || like.category === category) &&
+      (!list || like.list === list) &&
+      matches(like, query),
   );
   const openLike = likes?.find((like) => like.id === openId);
 
@@ -314,6 +322,17 @@ const LikesPage = () => {
             <option key={name}>{name}</option>
           ))}
         </select>
+        {lists.length > 0 && (
+          <select
+            onChange={(event) => setList(event.target.value)}
+            value={list}
+          >
+            <option value="">All lists</option>
+            {lists.map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {error && <p className="likes-error">{error}</p>}

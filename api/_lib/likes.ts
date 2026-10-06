@@ -19,6 +19,8 @@ export interface NewLike {
   url?: string;
   text?: string;
   note?: string;
+  list?: string;
+  review?: string;
   /**
    * Set by whoever saves it (Claude often knows what it is already);
    * enrichment only fills in what's missing
@@ -54,6 +56,8 @@ export function likeFromRow(row: Row): Like {
     url: (row.url as string | null) ?? null,
     text: String(row.text),
     note: String(row.note),
+    list: (row.list as string | null) ?? null,
+    review: String(row.review),
     photoUrl: row.photo
       ? `/api/likes?op=photo&id=${String(row.id)}&v=${createHash('sha256').update(String(row.photo)).digest('hex').slice(0, 8)}`
       : null,
@@ -93,16 +97,18 @@ export async function getLike(id: string): Promise<Like | undefined> {
 
 /**
  * Likes matching every word of `query` anywhere, newest first; `since` is a
- * date
+ * date, and `offset` skips that many for the next page
  */
 export async function searchLikes({
   query = '',
   since,
   limit = 20,
+  offset = 0,
 }: {
   query?: string;
   since?: string;
   limit?: number;
+  offset?: number;
 }): Promise<Like[]> {
   const sql = await requireSql();
   const rows = await sql`
@@ -110,20 +116,28 @@ export async function searchLikes({
     WHERE (${since ?? null}::date IS NULL OR created_at >= ${since ?? null}::date)
       AND NOT EXISTS (
         SELECT 1 FROM unnest(${wordPatterns(query)}::text[]) AS pattern
-        WHERE concat_ws(' ', url, text, note, title, description, category,
-          array_to_string(tags, ' ')) NOT ILIKE pattern)
-    ORDER BY created_at DESC
-    LIMIT ${limit}`;
+        WHERE concat_ws(' ', url, text, note, list, review, title, description,
+          category, array_to_string(tags, ' ')) NOT ILIKE pattern)
+    ORDER BY created_at DESC, id
+    LIMIT ${limit} OFFSET ${offset}`;
   return rows.map(likeFromRow);
 }
 
+/** A list name as it's stored: lowercase, or null for none */
+const listName = (list: string | undefined | null) =>
+  list?.trim().toLowerCase() || null;
+
 /**
  * Saves a like for enrichment to pick up. A link I've saved before returns
- * the existing like instead of a duplicate
+ * the existing like instead of a duplicate, with the list and review given
+ * this time (sharing it again after I've been)
  */
 export async function saveLike(like: NewLike): Promise<Like> {
   const url = like.url?.trim() || null;
-  const text = like.text?.trim() ?? '';
+  // The share sheet sends a web page as its link and as its text
+  const text = like.text?.trim() === url ? '' : (like.text?.trim() ?? '');
+  const list = listName(like.list);
+  const review = like.review?.trim() ?? '';
   if (url && !isHttpUrl(url)) {
     throw new LikeInputError('Links need to start with http:// or https://');
   }
@@ -133,7 +147,11 @@ export async function saveLike(like: NewLike): Promise<Like> {
 
   const sql = await requireSql();
   if (url) {
-    const [existing] = await sql`SELECT * FROM likes WHERE url = ${url}`;
+    const [existing] = await sql`
+      UPDATE likes SET list = coalesce(${list}, list),
+        review = coalesce(nullif(${review}, ''), review)
+      WHERE url = ${url}
+      RETURNING *`;
     if (existing) return likeFromRow(existing);
   }
   const id = randomUUID();
@@ -141,10 +159,11 @@ export async function saveLike(like: NewLike): Promise<Like> {
     ? await savePhoto(`likes/${id}.jpg`, like.photo)
     : null;
   const [row] = await sql`
-    INSERT INTO likes (id, url, text, note, photo, title, description,
-      category, tags, source)
-    VALUES (${id}, ${url}, ${text}, ${like.note?.trim() ?? ''}, ${photo},
-      ${like.title?.trim() ?? ''}, ${like.description?.trim() ?? ''},
+    INSERT INTO likes (id, url, text, note, list, review, photo, title,
+      description, category, tags, source)
+    VALUES (${id}, ${url}, ${text}, ${like.note?.trim() ?? ''}, ${list},
+      ${review}, ${photo}, ${like.title?.trim() ?? ''},
+      ${like.description?.trim() ?? ''},
       ${like.category?.trim() || null},
       ${(like.tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean)},
       ${like.source})
@@ -178,7 +197,10 @@ async function savePhoto(pathname: string, photo: Uint8Array | URL) {
   return blob.url;
 }
 
-/** My edits from /likes; fields left out stay as they are */
+/**
+ * My edits from /likes; fields left out stay as they are, and an empty list
+ * takes it off its list
+ */
 export async function updateLike(
   id: string,
   patch: LikePatch,
@@ -193,6 +215,9 @@ export async function updateLike(
     UPDATE likes SET
       title = coalesce(${text(patch.title)}, title),
       note = coalesce(${text(patch.note)}, note),
+      list = CASE WHEN ${typeof patch.list === 'string'}::boolean
+        THEN ${listName(patch.list)} ELSE list END,
+      review = coalesce(${text(patch.review)}, review),
       description = coalesce(${text(patch.description)}, description),
       category = coalesce(nullif(${text(patch.category)}, ''), category),
       tags = coalesce(${tags}::text[], tags)

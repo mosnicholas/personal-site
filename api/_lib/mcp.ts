@@ -27,10 +27,13 @@ import {
 } from './likes.js';
 import { logEvent } from './traces.js';
 
-const INSTRUCTIONS = `This is nimo's (Nicholas Moschopoulos's) own data. Likes are things he saved because he likes them: products, places, links, ideas, often with a note on why. Reading is what he saved to Readwise Reader, each with a summary and usually the full text. Search to find things, then get one for all of it.`;
+const INSTRUCTIONS = `This is nimo's (Nicholas Moschopoulos's) own data. Likes are things he saved because he likes them or wants to try them, often recommended to him: products, places, links, ideas, with a note on why or who recommended it. A like's list says where he stands with it, like want to try or been, and its review what he thought. Reading is what he saved to Readwise Reader, each with a summary and usually the full text. Search to find things, then get one for all of it.`;
 
 // About 25k tokens; the rest of a long document is left out
 const MAX_TEXT_CHARS = 100_000;
+
+// Results per page of a search; more come with offset
+const MAX_RESULTS = 100;
 
 type Content =
   | { type: 'text'; text: string }
@@ -70,6 +73,8 @@ const likeResult = (like: Like, site: string) => ({
   url: like.url,
   text: like.text,
   note: like.note,
+  list: like.list,
+  review: like.review,
   description: like.description,
   category: like.category,
   tags: like.tags,
@@ -94,6 +99,17 @@ const PHOTO_PARAMETER = {
   required: ['download_url', 'file_id'],
 };
 
+const LIST_PARAMETER = {
+  type: 'string',
+  description:
+    'Where he stands with it, like want to try or been; empty takes it off its list',
+};
+
+const REVIEW_PARAMETER = {
+  type: 'string',
+  description: 'What he thought of it, once he has been or tried it',
+};
+
 const photoUrl = (photo: unknown) => {
   const url = str(
     (photo as { download_url?: unknown } | undefined)?.download_url,
@@ -111,7 +127,12 @@ const TOOLS: Tool[] = [
       properties: {
         url: { type: 'string', description: 'The link, if there is one' },
         text: { type: 'string', description: 'What it is' },
-        note: { type: 'string', description: 'Why he likes it, if he said' },
+        note: {
+          type: 'string',
+          description: 'Why he likes it or who recommended it, if he said',
+        },
+        list: LIST_PARAMETER,
+        review: REVIEW_PARAMETER,
         photo: PHOTO_PARAMETER,
         title: {
           type: 'string',
@@ -138,6 +159,8 @@ const TOOLS: Tool[] = [
         url: str(args.url),
         text: str(args.text),
         note: str(args.note),
+        list: str(args.list),
+        review: str(args.review),
         photo: photoUrl(args.photo),
         title: str(args.title),
         description: str(args.description),
@@ -152,12 +175,14 @@ const TOOLS: Tool[] = [
   {
     name: 'update',
     description:
-      'Change a like: its note, title, description, category, tags or photo. Set reorganize to have its details written again from the note and photo, for instance after he says which version of something he means.',
+      'Change a like: its note, list, review, title, description, category, tags or photo. Set reorganize to have its details written again from the note and photo, for instance after he says which version of something he means.',
     inputSchema: {
       type: 'object',
       properties: {
         id: { type: 'string' },
         note: { type: 'string', description: 'Replaces the note' },
+        list: LIST_PARAMETER,
+        review: REVIEW_PARAMETER,
         title: { type: 'string' },
         description: { type: 'string' },
         category: { type: 'string' },
@@ -183,6 +208,8 @@ const TOOLS: Tool[] = [
       if (args.reorganize === true) await redoLike(id);
       const like = await updateLike(id, {
         note: str(args.note),
+        list: str(args.list),
+        review: str(args.review),
         title: str(args.title),
         description: str(args.description),
         category: str(args.category),
@@ -195,7 +222,7 @@ const TOOLS: Tool[] = [
   {
     name: 'search',
     description:
-      'Search nimo’s likes and the reading he saved to Readwise Reader. Every word of the query must appear somewhere (title, notes, tags, summary); leave it out to list the newest.',
+      'Search nimo’s likes and the reading he saved to Readwise Reader, newest first. Every word of the query must appear somewhere (title, notes, list, tags, summary); leave it out to list everything. When there are more results, nextOffset gives the offset for the next page.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -211,7 +238,11 @@ const TOOLS: Tool[] = [
         },
         limit: {
           type: 'integer',
-          description: 'Most results from each source, 20 by default',
+          description: `Most results from each source, 20 by default and ${MAX_RESULTS} at most`,
+        },
+        offset: {
+          type: 'integer',
+          description: 'How many results to skip, for the next page',
         },
       },
       additionalProperties: false,
@@ -222,18 +253,29 @@ const TOOLS: Tool[] = [
       if (since && !/^\d{4}-\d{2}-\d{2}/.test(since)) {
         throw new ToolError('since should be a date like 2026-10-01');
       }
+      const limit = Math.min(
+        Math.max(Number(args.limit) || 20, 1),
+        MAX_RESULTS,
+      );
+      const offset = Math.max(Math.floor(Number(args.offset)) || 0, 0);
+      // One more than the page, to tell whether there's a next one
       const search = {
         query: str(args.query),
         since: since?.slice(0, 10),
-        limit: Math.min(Math.max(Number(args.limit) || 20, 1), 100),
+        limit: limit + 1,
+        offset,
       };
       const [likes, reading] = await Promise.all([
         args.source === 'reading' ? undefined : searchLikes(search),
         args.source === 'likes' ? undefined : searchDocuments(search),
       ]);
+      const more = [likes, reading].some(
+        (found) => found && found.length > limit,
+      );
       return asJson({
-        likes: likes?.map((like) => likeResult(like, site)),
-        reading,
+        likes: likes?.slice(0, limit).map((like) => likeResult(like, site)),
+        reading: reading?.slice(0, limit),
+        ...(more ? { nextOffset: offset + limit } : {}),
       });
     },
   },

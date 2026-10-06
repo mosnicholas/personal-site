@@ -25,7 +25,9 @@ import { loggedCron } from './_lib/traces.js';
  * for the owner only (_lib/owner-auth.ts).
  *
  * - GET: every like, newest first; `?op=photo&id=` a like's photo
- * - POST: save a like, JSON `{ url, text, note }`, or a form that adds a `photo`
+ * - POST: save a like, JSON `{ url, text, note, list, review }`, or a form
+ *   that adds a `photo` (the iPhone share sheet's shortcut posts JSON with
+ *   the owner key as a bearer: docs/save-to-likes-shortcut.plist)
  * - POST `?op=import` `{ text }`: split pasted notes into likes
  * - PATCH `?id=` (a LikePatch), DELETE `?id=`
  * - POST `?op=redo&id=`: organize a like again, from my note and photo
@@ -132,6 +134,8 @@ async function handle(request: Request): Promise<Response> {
       url: fields.url,
       text: fields.text,
       note: fields.note,
+      list: fields.list,
+      review: fields.review,
       photo:
         photo instanceof File
           ? new Uint8Array(await photo.arrayBuffer())

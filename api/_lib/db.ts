@@ -296,6 +296,29 @@ const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
         claimed_at = NULL
       WHERE image_url IS NULL AND photo IS NULL`;
   },
+
+  // 6. Where I stand with a like (`list`: "want to try", "been", or my own
+  // words) and what I thought of it (`review`). Backfilled likes say in their
+  // text which of my old lists they came from: those from the lists of places,
+  // restaurants and events to try, and of favorite restaurants and best shows,
+  // get theirs; the rest stay unset
+  async (sql) => {
+    await sql`
+      ALTER TABLE likes
+        ADD COLUMN IF NOT EXISTS list text,
+        ADD COLUMN IF NOT EXISTS review text NOT NULL DEFAULT ''`;
+    await sql`
+      UPDATE likes SET list = 'want to try'
+      WHERE list IS NULL AND split_part(text, chr(10), 1) IN (
+        'Original section: Places to travel to',
+        'Original section: Restaurant to try',
+        'Original section: Events to travel for')`;
+    await sql`
+      UPDATE likes SET list = 'been'
+      WHERE list IS NULL AND split_part(text, chr(10), 1) IN (
+        'Original section: Favorite restaurants',
+        'Original section: Best live shows')`;
+  },
 ];
 
 async function migrate(sql: Sql): Promise<void> {

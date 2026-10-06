@@ -4,8 +4,15 @@ export interface Like {
   url: string | null;
   /** What I wrote or pasted when saving it */
   text: string;
-  /** Why I like it */
+  /** Why I like it, or who recommended it */
   note: string;
+  /**
+   * Where I stand with it, in my own words; so far "want to try" or "been".
+   * Null when it's just something I like
+   */
+  list: string | null;
+  /** What I thought of it, once I've been or tried it */
+  review: string;
   /** Where /likes loads the photo from; it changes when the photo does */
   photoUrl: string | null;
   /** Filled in by enrichment unless I set them first */
@@ -27,7 +34,10 @@ export interface Like {
 
 /** The fields I can edit on /likes */
 export type LikePatch = Partial<
-  Pick<Like, 'title' | 'note' | 'description' | 'category' | 'tags'>
+  Pick<
+    Like,
+    'title' | 'note' | 'list' | 'review' | 'description' | 'category' | 'tags'
+  >
 >;
 
 /** A like's title, or what to call it until it has one */

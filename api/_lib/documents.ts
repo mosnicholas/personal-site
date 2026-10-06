@@ -330,16 +330,19 @@ const savedDocument = (row: Record<string, unknown>): SavedDocument => ({
 
 /**
  * Saved documents (not the feed) matching every word of `query` in their
- * title, author, site, tags or summary, newest first; `since` is a date
+ * title, author, site, tags or summary, newest first; `since` is a date, and
+ * `offset` skips that many for the next page
  */
 export async function searchDocuments({
   query = '',
   since,
   limit = 20,
+  offset = 0,
 }: {
   query?: string;
   since?: string;
   limit?: number;
+  offset?: number;
 }): Promise<SavedDocument[]> {
   const sql = await requireSql();
   const rows = await sql`
@@ -353,8 +356,8 @@ export async function searchDocuments({
         SELECT 1 FROM unnest(${wordPatterns(query)}::text[]) AS pattern
         WHERE concat_ws(' ', title, author, site_name, summary,
           readwise_summary, array_to_string(tags, ' ')) NOT ILIKE pattern)
-    ORDER BY saved_at DESC NULLS LAST
-    LIMIT ${limit}`;
+    ORDER BY saved_at DESC NULLS LAST, id
+    LIMIT ${limit} OFFSET ${offset}`;
   return rows.map(savedDocument);
 }
 

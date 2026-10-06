@@ -13,6 +13,8 @@ import {
 interface Draft {
   title: string;
   note: string;
+  list: string;
+  review: string;
   description: string;
   category: string;
   tags: string;
@@ -21,6 +23,8 @@ interface Draft {
 const draftOf = (like: Like): Draft => ({
   title: like.title,
   note: like.note,
+  list: like.list ?? '',
+  review: like.review,
   description: like.description,
   category: like.category ?? '',
   tags: like.tags.join(', '),
@@ -68,7 +72,14 @@ const LikeDetail = ({
   const changes = () => {
     const before = draftOf(like);
     const patch: LikePatch = {};
-    for (const field of ['title', 'note', 'description', 'category'] as const) {
+    for (const field of [
+      'title',
+      'note',
+      'list',
+      'review',
+      'description',
+      'category',
+    ] as const) {
       if (draft[field] !== before[field]) patch[field] = draft[field];
     }
     if (draft.tags !== before.tags) {
@@ -164,7 +175,24 @@ const LikeDetail = ({
         )}
 
         {field('title', 'Title')}
-        {field('note', 'Why I like it', 3)}
+        {field('note', 'Why I like it, or who recommended it', 3)}
+        <label className="likes-field">
+          List
+          <input
+            list="likes-lists"
+            onChange={(event) =>
+              setDraft({ ...draft, list: event.target.value })
+            }
+            placeholder="want to try, been…"
+            value={draft.list}
+          />
+          <datalist id="likes-lists">
+            <option value="want to try" />
+            <option value="been" />
+          </datalist>
+        </label>
+        {(draft.list.trim().toLowerCase() === 'been' || draft.review) &&
+          field('review', 'How it was', 3)}
         {field('description', 'Description', 3)}
         {field('category', 'Category')}
         {field('tags', 'Tags')}
