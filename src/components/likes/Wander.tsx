@@ -21,6 +21,7 @@ const Wander = ({
   startId,
   paused,
   onEdit,
+  onMove,
   onClose,
 }: {
   likes: Like[];
@@ -28,6 +29,8 @@ const Wander = ({
   /** While the edit panel is open over it, Escape and arrows are the panel's */
   paused: boolean;
   onEdit: (id: string) => void;
+  /** Each like it comes to, to keep in the URL */
+  onMove: (id: string) => void;
   onClose: () => void;
 }) => {
   const [path, setPath] = useState<Step[]>([{ id: startId, via: null }]);
@@ -52,6 +55,11 @@ const Wander = ({
       document.body.style.overflow = '';
     };
   }, []);
+
+  const id = like?.id;
+  useEffect(() => {
+    if (id) onMove(id);
+  }, [id, onMove]);
 
   // Deleted from the edit panel
   useEffect(() => {

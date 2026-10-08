@@ -13,7 +13,14 @@ import {
 } from './api';
 import LikeDetail from './LikeDetail';
 import Shelf from './Shelf';
-import { inTrail, pick, type Trail, trailFromUrl, trailUrl } from './trail';
+import {
+  inTrail,
+  itemFromUrl,
+  pick,
+  type Trail,
+  trailFromUrl,
+  trailUrl,
+} from './trail';
 import Wander from './Wander';
 import './likes.css';
 
@@ -226,18 +233,43 @@ const LikeCard = ({ like, onOpen }: { like: Like; onOpen: () => void }) => {
   );
 };
 
+/**
+ * The last list fetched, shown at once on the next visit while a fresh one
+ * loads: a cold function and a sleeping database can take a few seconds
+ */
+const CACHE_KEY = 'likes';
+
+const cachedLikes = (): Like[] | undefined => {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    return cached ? (JSON.parse(cached) as Like[]) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const cacheLikes = (likes: Like[] | undefined) => {
+  try {
+    if (likes) localStorage.setItem(CACHE_KEY, JSON.stringify(likes));
+    else localStorage.removeItem(CACHE_KEY);
+  } catch {
+    // Private windows and full storage just go without
+  }
+};
+
 const LikesPage = () => {
-  const [likes, setLikes] = useState<Like[]>();
+  const [likes, setLikes] = useState<Like[] | undefined>(cachedLikes);
+  // Whether `likes` came from the server yet, not just the cache
+  const [fresh, setFresh] = useState(false);
   const [signedOut, setSignedOut] = useState(false);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [trail, setTrail] = useState<Trail>(trailFromUrl);
   const [list, setList] = useState('');
-  // ?item= opens a like, e.g. from the monthly email or Claude
-  const [openId, setOpenId] = useState(() =>
-    new URLSearchParams(window.location.search).get('item'),
-  );
-  // Where Wander started; a new start begins a new path
+  // The like whose edit panel is open
+  const [openId, setOpenId] = useState<string | null>(null);
+  // Where Wander started; a new start begins a new path. ?item= opens it, e.g.
+  // from the monthly email or Claude
   const [wander, setWander] = useState<{ id: string; walk: number }>();
 
   useEffect(() => {
@@ -254,12 +286,16 @@ const LikesPage = () => {
       ({ likes }) => {
         if (!current) return;
         setLikes(likes);
+        setFresh(true);
+        cacheLikes(likes);
         setSignedOut(false);
         setError('');
       },
       (reason: unknown) => {
         if (!current) return;
         if (reason instanceof ApiError && reason.status === 401) {
+          setLikes(undefined);
+          cacheLikes(undefined);
           setSignedOut(true);
         } else {
           setError(errorMessage(reason));
@@ -279,13 +315,45 @@ const LikesPage = () => {
     return () => window.clearInterval(timer);
   }, [organizing, reload]);
 
-  const close = useCallback(() => {
-    setOpenId(null);
-    window.history.replaceState(null, '', trailUrl(trailFromUrl()));
+  // Wander is a page of its own: opening it adds a history entry, so Back
+  // returns to the shelf, and the URL follows the like shown (?item=)
+  useEffect(() => {
+    const sync = () => {
+      setTrail(trailFromUrl());
+      const id = itemFromUrl();
+      setWander((current) =>
+        !id
+          ? undefined
+          : current?.id === id
+            ? current
+            : { id, walk: (current?.walk ?? 0) + 1 },
+      );
+    };
+    sync();
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
   }, []);
-  const closeWander = useCallback(() => setWander(undefined), []);
-  const startWander = (id: string) =>
+
+  const close = useCallback(() => setOpenId(null), []);
+  const closeWander = useCallback(() => {
+    if ((window.history.state as { wander?: boolean } | null)?.wander) {
+      window.history.back();
+    } else {
+      setWander(undefined);
+      window.history.replaceState(null, '', trailUrl(trailFromUrl()));
+    }
+  }, []);
+  const startWander = (id: string) => {
     setWander((current) => ({ id, walk: (current?.walk ?? 0) + 1 }));
+    window.history.pushState({ wander: true }, '', trailUrl(trail, id));
+  };
+  const wanderTo = useCallback((id: string) => {
+    window.history.replaceState(
+      window.history.state,
+      '',
+      trailUrl(trailFromUrl(), id),
+    );
+  }, []);
 
   const moveTo = (next: Trail) => {
     setTrail(next);
@@ -313,9 +381,11 @@ const LikesPage = () => {
         <button
           className="likes-text-button"
           onClick={() =>
-            void api('?op=logout', { method: 'POST' }).then(() =>
-              setSignedOut(true),
-            )
+            void api('?op=logout', { method: 'POST' }).then(() => {
+              setLikes(undefined);
+              cacheLikes(undefined);
+              setSignedOut(true);
+            })
           }
           type="button"
         >
@@ -374,16 +444,20 @@ const LikesPage = () => {
         ))}
       </section>
 
-      {likes && wander && (
-        <Wander
-          key={wander.walk}
-          likes={likes}
-          onClose={closeWander}
-          onEdit={setOpenId}
-          paused={!!openLike}
-          startId={wander.id}
-        />
-      )}
+      {likes &&
+        wander &&
+        // A like newer than the cache waits for the fresh list
+        (fresh || likes.some((like) => like.id === wander.id)) && (
+          <Wander
+            key={wander.walk}
+            likes={likes}
+            onClose={closeWander}
+            onEdit={setOpenId}
+            onMove={wanderTo}
+            paused={!!openLike}
+            startId={wander.id}
+          />
+        )}
 
       {openLike && (
         <LikeDetail
