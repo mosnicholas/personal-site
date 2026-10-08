@@ -464,7 +464,8 @@ async function pickImage(
       },
     ],
   };
-  const shown = await tracedCall(
+  // The trace keeps the URLs of the pictures that show it, not their bytes
+  const shownUrls = await tracedCall(
     {
       kind: 'likes_enrichment',
       subjectId: like.id,
@@ -478,7 +479,9 @@ async function pickImage(
       );
       const numbers =
         (call?.input as { pictures: number[] } | undefined)?.pictures ?? [];
-      return pictures.filter((_, i) => numbers.includes(i + 1));
+      return pictures
+        .filter((_, i) => numbers.includes(i + 1))
+        .map((picture) => picture.url);
     },
   ).catch((error: unknown) => {
     // An image the API won't take shouldn't cost the like its details. Most
@@ -486,8 +489,12 @@ async function pickImage(
     console.error(`Could not pick an image for like ${like.id}:`, error);
     return undefined;
   });
-  if (!shown) return preview();
-  return shown.sort((a, b) => b.data.length - a.data.length)[0] ?? null;
+  if (!shownUrls) return preview();
+  return (
+    pictures
+      .filter((picture) => shownUrls.includes(picture.url))
+      .sort((a, b) => b.data.length - a.data.length)[0] ?? null
+  );
 }
 
 async function enrichLike(like: Like): Promise<void> {
