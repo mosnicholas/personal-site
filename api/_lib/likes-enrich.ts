@@ -20,6 +20,7 @@ import {
   photoBytes,
   saveLike,
 } from './likes.js';
+import { getSyncState } from './documents.js';
 import { htmlToText } from './summarize.js';
 import { tracedCall } from './traces.js';
 import type { Like } from '../../shared/likes.js';
@@ -32,6 +33,14 @@ const MAX_PHOTOS = 4;
 const IDENTIFY_PROMPT = `Someone saved this to their collection of things they like: links, notes and photos they keep so they can find them again and remember what each one was. Search the web for it and say exactly what it is: brand and model for a product, the name of a place or work. The pages you find also give it its picture in the collection, so search even when you already know what it is. Their text, note and photos show what caught their eye: when they single out one version, like a color, a material, or one of several models on a page, say which.`;
 
 const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. From what they saved and what it turned out to be, fill in the details: the title and description let them recognize it at a glance, and the category and tags group it with similar things when they browse. When they singled out one version of something, the details are about that version. Reuse a category and its tags when they fit, and start a new one when none does.`;
+
+/** The categories the last realign settled on, which Haiku sees when it organizes a like (likes-realign.ts) */
+export interface LikeCategoryDescription {
+  name: string;
+  description: string;
+}
+
+export const CATEGORIES_STATE = 'likes_categories';
 
 /** What the category and tags are for; Claude saving over MCP is told the same */
 export const CATEGORY_DESCRIPTION =
@@ -341,16 +350,23 @@ async function identify(like: Like, content: Anthropic.ContentBlockParam[]) {
  * the search results, picking the ones about it as sources
  */
 async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
-  const categories = (await likeCategories())
-    .map(
-      ({ name, likes, examples, tags }) =>
-        `${name} (${likes}): ${examples.join('; ')}${tags.length ? `. Tags: ${tags.join(', ')}` : ''}`,
-    )
+  const [inUse, described] = await Promise.all([
+    likeCategories(),
+    getSyncState<LikeCategoryDescription[]>(CATEGORIES_STATE),
+  ]);
+  const descriptions = new Map(
+    (described ?? []).map(({ name, description }) => [name, description]),
+  );
+  const categories = inUse
+    .map(({ name, likes, examples, tags }) => {
+      const description = descriptions.get(name);
+      return `${name} (${likes})${description ? `: ${description}` : ''}. Latest: ${examples.join('; ')}${tags.length ? `. Tags: ${tags.join(', ')}` : ''}`;
+    })
     .join('\n');
   const request = {
     model: MODEL,
     max_tokens: 4096,
-    system: `${SYSTEM_PROMPT}\n\nCategories so far, with how many likes, the latest few, and their most used tags:\n${categories || '(none yet)'}`,
+    system: `${SYSTEM_PROMPT}\n\nCategories so far, with how many likes, what belongs in them, the latest few, and their most used tags:\n${categories || '(none yet)'}`,
     tools: [SAVE_DETAILS],
     tool_choice: { type: 'tool' as const, name: SAVE_DETAILS.name },
     messages: [{ role: 'user' as const, content }],
