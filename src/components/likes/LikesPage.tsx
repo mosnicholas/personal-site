@@ -12,6 +12,9 @@ import {
   savedDate,
 } from './api';
 import LikeDetail from './LikeDetail';
+import Shelf from './Shelf';
+import { inTrail, pick, type Trail, trailFromUrl, trailUrl } from './trail';
+import Wander from './Wander';
 import './likes.css';
 
 const matches = (like: Like, query: string) => {
@@ -228,12 +231,14 @@ const LikesPage = () => {
   const [signedOut, setSignedOut] = useState(false);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('');
+  const [trail, setTrail] = useState<Trail>(trailFromUrl);
   const [list, setList] = useState('');
   // ?item= opens a like, e.g. from the monthly email or Claude
   const [openId, setOpenId] = useState(() =>
     new URLSearchParams(window.location.search).get('item'),
   );
+  // Where Wander started; a new start begins a new path
+  const [wander, setWander] = useState<{ id: string; walk: number }>();
 
   useEffect(() => {
     document.title = 'nimo / likes';
@@ -276,18 +281,24 @@ const LikesPage = () => {
 
   const close = useCallback(() => {
     setOpenId(null);
-    window.history.replaceState(null, '', '/likes');
+    window.history.replaceState(null, '', trailUrl(trailFromUrl()));
   }, []);
+  const closeWander = useCallback(() => setWander(undefined), []);
+  const startWander = (id: string) =>
+    setWander((current) => ({ id, walk: (current?.walk ?? 0) + 1 }));
+
+  const moveTo = (next: Trail) => {
+    setTrail(next);
+    window.history.replaceState(null, '', trailUrl(next));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   if (signedOut) return <Login onSignedIn={reload} />;
 
-  const categories = [
-    ...new Set(likes?.flatMap((like) => like.category ?? [])),
-  ].sort();
   const lists = [...new Set(likes?.flatMap((like) => like.list ?? []))].sort();
   const shown = likes?.filter(
     (like) =>
-      (!category || like.category === category) &&
+      inTrail(like, trail) &&
       (!list || like.list === list) &&
       matches(like, query),
   );
@@ -322,15 +333,6 @@ const LikesPage = () => {
           type="search"
           value={query}
         />
-        <select
-          onChange={(event) => setCategory(event.target.value)}
-          value={category}
-        >
-          <option value="">All categories</option>
-          {categories.map((name) => (
-            <option key={name}>{name}</option>
-          ))}
-        </select>
         {lists.length > 0 && (
           <select
             onChange={(event) => setList(event.target.value)}
@@ -342,7 +344,19 @@ const LikesPage = () => {
             ))}
           </select>
         )}
+        <button
+          className="likes-wander-button"
+          disabled={!shown?.length}
+          onClick={() => shown?.length && startWander(pick(shown).id)}
+          type="button"
+        >
+          Wander ↝
+        </button>
       </div>
+
+      {likes && shown && (
+        <Shelf likes={likes} onChange={moveTo} shown={shown} trail={trail} />
+      )}
 
       {error && <p className="likes-error">{error}</p>}
       {shown && shown.length === 0 && (
@@ -355,10 +369,21 @@ const LikesPage = () => {
           <LikeCard
             key={like.id}
             like={like}
-            onOpen={() => setOpenId(like.id)}
+            onOpen={() => startWander(like.id)}
           />
         ))}
       </section>
+
+      {likes && wander && (
+        <Wander
+          key={wander.walk}
+          likes={likes}
+          onClose={closeWander}
+          onEdit={setOpenId}
+          paused={!!openLike}
+          startId={wander.id}
+        />
+      )}
 
       {openLike && (
         <LikeDetail
