@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
-import { likeTitle, type Like } from '../../../shared/likes';
-import { likeImage, savedDate } from './api';
+import { likeImage, likeTitle, type Like } from '../../../shared/likes';
+import { savedDate } from './api';
 import { Faces } from './Shelf';
 import { pick } from './trail';
 
@@ -92,7 +92,7 @@ const Wander = ({
     );
   };
   const others = likes.filter((other) => other.id !== like.id);
-  const image = likeImage(like);
+  const image = likeImage(like, 1600);
 
   return (
     <div aria-label="Wander" className="likes-wander" role="dialog">
@@ -177,7 +177,7 @@ const Wander = ({
         <div className="likes-path">
           {path.map((visited, i) => {
             const stop = likes.find((other) => other.id === visited.id);
-            const src = stop && likeImage(stop);
+            const src = stop && likeImage(stop, 96);
             return (
               <span className="likes-path-stop" key={`${i}-${visited.id}`}>
                 {visited.via && (

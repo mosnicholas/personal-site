@@ -14,8 +14,8 @@ export interface Like {
   /** What I thought of it, once I've been or tried it */
   review: string;
   /**
-   * Where /likes loads my photos from, the first one the cover; each URL
-   * changes when its photo does
+   * My photos, the first the cover: the public URL of each original in
+   * Storage (size them with sizedPicture)
    */
   photoUrls: string[];
   /** Filled in by enrichment unless I set them first */
@@ -23,8 +23,10 @@ export interface Like {
   description: string;
   category: string | null;
   tags: string[];
-  /** The page's preview image (og:image), for links */
+  /** Where the picture came from, usually the page's preview image (og:image) */
   imageUrl: string | null;
+  /** That picture as stored in Storage (the original), once it is */
+  pictureUrl: string | null;
   /** Web pages the model used to identify it */
   sources: { url: string; title: string }[];
   /** pending until enrichment runs; failed keeps the error until a retry */
@@ -49,3 +51,25 @@ export const likeTitle = (like: Like) =>
   like.url?.replace(/^https?:\/\/(www\.)?/, '') ||
   like.text.slice(0, 80) ||
   'Photo';
+
+const ORIGINAL = '/storage/v1/object/public/';
+
+/**
+ * A stored picture at `width` pixels, rendered by Supabase's image
+ * transformations (WebP when the browser takes it); any other URL as it is.
+ * `contain` keeps the proportions: width alone kept the original height.
+ * `keepFormat` skips WebP, for email (Outlook on Windows doesn't show it)
+ */
+export const sizedPicture = (url: string, width: number, keepFormat = false) =>
+  url.includes(ORIGINAL)
+    ? `${url.replace(ORIGINAL, '/storage/v1/render/image/public/')}?width=${width}&resize=contain${keepFormat ? '&format=origin' : ''}`
+    : url;
+
+/**
+ * The like's picture at `width`: its first photo, else its stored picture,
+ * else the page's preview image where it came from (until it's stored)
+ */
+export const likeImage = (like: Like, width: number, keepFormat = false) => {
+  const picture = like.photoUrls[0] ?? like.pictureUrl;
+  return picture ? sizedPicture(picture, width, keepFormat) : like.imageUrl;
+};

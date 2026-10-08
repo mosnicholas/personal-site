@@ -1,16 +1,23 @@
 /**
  * The likes collection (/likes): links, notes and photos I save, in the
- * `likes` table (db.ts), with photos in a private Vercel Blob store. Haiku
+ * `likes` table (db.ts), with photos and pictures in Storage (pictures.ts). Haiku
  * fills in each like's title, description, category and tags in the
  * background (likes-enrich.ts), leaving alone anything I set myself.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
-
-import { del, get, put, putImage } from '@vercel/blob';
+import { randomUUID } from 'node:crypto';
 
 import type { Like, LikePatch } from '../../shared/likes.js';
 import { requireSql, wordPatterns } from './db.js';
+import {
+  deletePictures,
+  downloadPicture,
+  fetchStoredPicture,
+  type Picture,
+  pictureType,
+  publicPictureUrl,
+  uploadPicture,
+} from './pictures.js';
 
 /** A save the caller got wrong, answered with a 400 */
 export class LikeInputError extends Error {}
@@ -32,7 +39,7 @@ export interface NewLike {
   /**
    * JPEGs resized before upload (by the browser or the share sheet), or the
    * URL of an image (ChatGPT passes the photos attached in a chat as
-   * temporary URLs)
+   * temporary URLs), which is stored as it is
    */
   photos?: (Uint8Array | URL)[];
   /** web, mcp, or import */
@@ -45,15 +52,16 @@ export interface LikeDetails {
   description: string;
   category: string;
   tags: string[];
+  /** Where the picture came from, and the path it was stored at */
   imageUrl: string | null;
+  imagePath: string | null;
   sources: Like['sources'];
 }
 
 type Row = Record<string, unknown>;
 
 export function likeFromRow(row: Row): Like {
-  const version = (photo: string) =>
-    createHash('sha256').update(photo).digest('hex').slice(0, 8);
+  const imagePath = row.image_path as string | null;
   return {
     id: String(row.id),
     url: (row.url as string | null) ?? null,
@@ -61,15 +69,17 @@ export function likeFromRow(row: Row): Like {
     note: String(row.note),
     list: (row.list as string | null) ?? null,
     review: String(row.review),
-    photoUrls: (row.photos as string[]).map(
-      (photo, n) =>
-        `/api/likes?op=photo&id=${String(row.id)}&n=${n}&v=${version(photo)}`,
+    // A full URL is a photo still in Blob storage, until it's moved
+    // (storePictures)
+    photoUrls: (row.photos as string[]).map((photo) =>
+      photo.startsWith('http') ? photo : publicPictureUrl(photo),
     ),
     title: String(row.title),
     description: String(row.description),
     category: (row.category as string | null) ?? null,
     tags: row.tags as string[],
     imageUrl: (row.image_url as string | null) ?? null,
+    pictureUrl: imagePath ? publicPictureUrl(imagePath) : null,
     sources: row.sources as Like['sources'],
     status: row.status as Like['status'],
     error: (row.error as string | null) ?? null,
@@ -177,32 +187,26 @@ export async function saveLike(like: NewLike): Promise<Like> {
 }
 
 /**
- * Stores one of a like's photos as a JPEG in Blob storage and returns its
- * URL. Each photo gets a new path, so nothing serves an old one from a cache.
- * A URL is fetched and resized by Vercel Image Optimization, which needs the
- * OIDC credentials Vercel provides (so it doesn't work locally)
+ * Stores one of a like's photos and returns its path in the bucket. The
+ * browser and the share sheet send JPEGs; a URL is fetched and stored as it
+ * is, once its first bytes say it's an image
  */
 async function savePhoto(id: string, photo: Uint8Array | URL) {
-  const pathname = `likes/${id}-${randomUUID().slice(0, 8)}.jpg`;
-  if (!(photo instanceof URL)) {
-    const blob = await put(pathname, Buffer.from(photo), {
-      access: 'private',
-      contentType: 'image/jpeg',
-    });
-    return blob.url;
+  if (photo instanceof URL) {
+    if (!isHttpUrl(photo.href)) {
+      throw new LikeInputError('Photos need an http:// or https:// URL');
+    }
+    const { picture } = await downloadPicture(photo.href, MAX_PHOTO_BYTES);
+    if (!picture) throw new LikeInputError('Couldn’t read that photo');
+    return uploadPicture(id, picture.data, picture.type);
   }
-  if (!isHttpUrl(photo.href)) {
-    throw new LikeInputError('Photos need an http:// or https:// URL');
-  }
-  const blob = await putImage(pathname, photo, {
-    access: 'private',
-    optimizeImage: { width: 2048, quality: 85, format: 'jpeg' },
-  }).catch((error: unknown) => {
-    console.error('Could not save the photo:', error);
-    throw new LikeInputError('Couldn’t read that photo');
-  });
-  return blob.url;
+  const type = pictureType(photo);
+  if (!type) throw new LikeInputError('Couldn’t read that photo');
+  return uploadPicture(id, photo, type);
 }
+
+// The biggest photo taken from a URL
+const MAX_PHOTO_BYTES = 25_000_000;
 
 /**
  * My edits from /likes; fields left out stay as they are, and an empty list
@@ -233,11 +237,17 @@ export async function updateLike(
   return row ? likeFromRow(row) : undefined;
 }
 
+/** The paths in the bucket among a like's photos and its picture */
+const storedPaths = (photos: string[], imagePath: string | null) =>
+  [...photos, imagePath].filter(
+    (path): path is string => Boolean(path) && !path?.startsWith('http'),
+  );
+
 export async function deleteLike(id: string): Promise<boolean> {
   const sql = requireSql();
-  const [row] = await sql`DELETE FROM likes WHERE id = ${id} RETURNING photos`;
-  const photos = (row?.photos ?? []) as string[];
-  if (photos.length) await del(photos);
+  const [row] = await sql`
+    DELETE FROM likes WHERE id = ${id} RETURNING photos, image_path`;
+  if (row) await deletePictures(storedPaths(row.photos, row.image_path));
   return Boolean(row);
 }
 
@@ -248,12 +258,14 @@ export async function deleteLike(id: string): Promise<boolean> {
  */
 export async function redoLike(id: string): Promise<Like | undefined> {
   const sql = requireSql();
+  const [old] = await sql`SELECT image_path FROM likes WHERE id = ${id}`;
   const [row] = await sql`
     UPDATE likes SET title = '', description = '', category = NULL,
-      tags = '{}', image_url = NULL, sources = '[]', status = 'pending',
-      error = NULL, attempts = 0, claimed_at = NULL
+      tags = '{}', image_url = NULL, image_path = NULL, sources = '[]',
+      status = 'pending', error = NULL, attempts = 0, claimed_at = NULL
     WHERE id = ${id}
     RETURNING *`;
+  if (old?.image_path) await deletePictures([String(old.image_path)]);
   return row ? likeFromRow(row) : undefined;
 }
 
@@ -263,10 +275,10 @@ export async function addPhoto(
   photo: Uint8Array | URL,
 ): Promise<Like | undefined> {
   if (!(await getLike(id))) return undefined;
-  const url = await savePhoto(id, photo);
+  const path = await savePhoto(id, photo);
   const sql = requireSql();
   const [row] = await sql`
-    UPDATE likes SET photos = array_append(photos, ${url})
+    UPDATE likes SET photos = array_append(photos, ${path})
     WHERE id = ${id}
     RETURNING *`;
   return row ? likeFromRow(row) : undefined;
@@ -279,29 +291,14 @@ export async function removePhoto(
 ): Promise<Like | undefined> {
   const sql = requireSql();
   const [old] = await sql`SELECT photos FROM likes WHERE id = ${id}`;
-  const url = (old?.photos as string[] | undefined)?.[n];
-  if (!url) return undefined;
+  const photo = (old?.photos as string[] | undefined)?.[n];
+  if (!photo) return undefined;
   const [row] = await sql`
-    UPDATE likes SET photos = array_remove(photos, ${url})
+    UPDATE likes SET photos = array_remove(photos, ${photo})
     WHERE id = ${id}
     RETURNING *`;
-  await del(url);
+  await deletePictures(storedPaths([photo], null));
   return likeFromRow(row);
-}
-
-/** A like's photo `n` (counting from 0), streamed from Blob storage */
-export async function readPhoto(
-  id: string,
-  n: number,
-): Promise<{ stream: ReadableStream<Uint8Array>; type: string } | undefined> {
-  const sql = requireSql();
-  const [row] = await sql`
-    SELECT photos[${n + 1}::int] AS photo FROM likes WHERE id = ${id}`;
-  if (!row?.photo) return undefined;
-  const blob = await get(String(row.photo), { access: 'private' });
-  return blob?.statusCode === 200
-    ? { stream: blob.stream, type: blob.blob.contentType }
-    : undefined;
 }
 
 export interface LikeCategory {
@@ -371,6 +368,9 @@ export async function finishLike(id: string, details: LikeDetails) {
         ELSE description END,
       category = coalesce(category, ${details.category}),
       tags = CASE WHEN tags = '{}' THEN ${details.tags}::text[] ELSE tags END,
+      -- The picture and where it came from go together
+      image_path = CASE WHEN image_url IS NULL THEN ${details.imagePath}
+        ELSE image_path END,
       image_url = coalesce(image_url, ${details.imageUrl}),
       sources = CASE WHEN sources = '[]' THEN ${JSON.stringify(details.sources)}::jsonb
         ELSE sources END,
@@ -383,15 +383,18 @@ export async function failLike(id: string, error: string) {
   await sql`UPDATE likes SET status = 'failed', error = ${error} WHERE id = ${id}`;
 }
 
-/** The bytes of a like's first `limit` photos, for a model to look at */
-export async function photoBytes(like: Like, limit: number): Promise<Buffer[]> {
+// Photos shown to a model are resized to fit the Anthropic API's limits
+const MODEL_PHOTO_WIDTH = 1568;
+
+/** A like's first `limit` photos, resized, for a model to look at */
+export async function photoBytes(
+  like: Like,
+  limit: number,
+): Promise<Picture[]> {
   const photos = await Promise.all(
-    like.photoUrls.slice(0, limit).map(async (_, n) => {
-      const photo = await readPhoto(like.id, n);
-      return photo
-        ? Buffer.from(await new Response(photo.stream).arrayBuffer())
-        : undefined;
-    }),
+    like.photoUrls
+      .slice(0, limit)
+      .map((url) => fetchStoredPicture(url, MODEL_PHOTO_WIDTH)),
   );
   return photos.filter((photo) => photo !== undefined);
 }

@@ -11,6 +11,7 @@ struct Like: Decodable, Identifiable, Equatable {
   let title: String
   let category: String?
   let imageUrl: String?
+  let pictureUrl: String?
   let status: String
   let error: String?
 
@@ -75,11 +76,6 @@ struct API {
   func likes() async throws -> [Like] {
     struct Response: Decodable { let likes: [Like] }
     return try JSONDecoder().decode(Response.self, from: await send(request("/api/likes"))).likes
-  }
-
-  /// A photo of mine, which needs the key
-  func photo(_ path: String) async throws -> Data {
-    try await send(request(path))
   }
 
   private func save(_ fields: [String: String]) async throws -> Like {

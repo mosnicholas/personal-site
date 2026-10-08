@@ -34,9 +34,6 @@ export const json = (method: string, body: unknown): RequestInit => ({
 export const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong';
 
-/** The like's first photo, or its page's preview image */
-export const likeImage = (like: Like) => like.photoUrls[0] ?? like.imageUrl;
-
 export const savedDate = (like: Like) =>
   new Date(like.createdAt).toLocaleDateString(undefined, {
     month: 'short',

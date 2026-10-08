@@ -21,6 +21,12 @@ import {
   saveLike,
 } from './likes.js';
 import { getSyncState } from './documents.js';
+import {
+  downloadPicture,
+  type Picture,
+  uploadPicture,
+  USER_AGENT,
+} from './pictures.js';
 import { htmlToText } from './summarize.js';
 import { tracedCall } from './traces.js';
 import type { Like } from '../../shared/likes.js';
@@ -124,23 +130,6 @@ interface Page {
   images: string[];
 }
 
-/**
- * The image type Claude reads that the file is, from its first bytes: some
- * servers send PNGs as image/jpeg or JPEGs as image/jpg, and the API
- * rejects a request whose stated type is wrong
- */
-function pictureType(data: Buffer): Picture['type'] | undefined {
-  const starts = (bytes: number[], at = 0) =>
-    bytes.every((byte, i) => data[at + i] === byte);
-  if (starts([0xff, 0xd8, 0xff])) return 'image/jpeg';
-  if (starts([0x89, 0x50, 0x4e, 0x47])) return 'image/png';
-  if (starts([0x47, 0x49, 0x46, 0x38])) return 'image/gif';
-  if (starts([0x52, 0x49, 0x46, 0x46]) && starts([0x57, 0x45, 0x42, 0x50], 8)) {
-    return 'image/webp';
-  }
-  return undefined;
-}
-
 // Pictures shown to Haiku: files under 5 MB once base64-encoded (the API's
 // limit), at least a few KB (smaller ones are icons, flags and spacers), and
 // at most this many and these many bytes in one request
@@ -163,12 +152,6 @@ function imgSource(tag: string): string | undefined {
   return largest ?? attribute('src');
 }
 
-interface Picture {
-  url: string;
-  type: Anthropic.Base64ImageSource['media_type'];
-  data: Buffer;
-}
-
 /** `<meta>` tags by property or name, e.g. og:image */
 function metaTags(html: string): Map<string, string> {
   const tags = new Map<string, string>();
@@ -186,10 +169,6 @@ function metaTags(html: string): Map<string, string> {
   }
   return tags;
 }
-
-// Some sites turn away requests that don't look like a browser
-const USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
 
 /**
  * The linked page's title, description, preview image and text. Many sites
@@ -238,22 +217,12 @@ async function fetchPage(url: string): Promise<Page | undefined> {
   }
 }
 
-/** An image, if it loads, is a kind Claude reads, and isn't too big */
-async function loadPicture(url: string): Promise<Picture | undefined> {
-  try {
-    const response = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) return undefined;
-    const data = Buffer.from(await response.arrayBuffer());
-    const type = pictureType(data);
-    return type && data.length <= MAX_PICTURE_BYTES
-      ? { url, type, data }
-      : undefined;
-  } catch {
-    return undefined;
-  }
+/** A picture from the web, if it loads, is a kind Claude reads, and isn't too big */
+async function loadPicture(
+  url: string,
+): Promise<(Picture & { url: string }) | undefined> {
+  const { picture } = await downloadPicture(url, MAX_PICTURE_BYTES);
+  return picture && { url, ...picture };
 }
 
 /** The request without image bytes, which don't belong in the trace log */
@@ -278,15 +247,15 @@ const withoutImages = <Request extends { messages: Anthropic.MessageParam[] }>(
 /** The save as Haiku sees it: the photos, then the rest as JSON */
 function saveContent(
   save: Record<string, unknown>,
-  photos: Buffer[],
+  photos: Picture[],
 ): Anthropic.ContentBlockParam[] {
   return [
     ...photos.map((photo) => ({
       type: 'image' as const,
       source: {
         type: 'base64' as const,
-        media_type: 'image/jpeg' as const,
-        data: photo.toString('base64'),
+        media_type: photo.type,
+        data: photo.data.toString('base64'),
       },
     })),
     { type: 'text', text: JSON.stringify(save, null, 2) },
@@ -402,17 +371,37 @@ async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
   };
 }
 
+/** The picture chosen for a like, with its bytes if they were loaded */
+interface ChosenImage {
+  url: string;
+  picture?: Picture;
+}
+
 /**
  * The like's image: the sharpest picture that shows it, among the preview
  * images and first few images of the linked page and the source pages. A preview image can be the site's own picture, a page that moved,
  * or another version, so Haiku says which pictures show it; of those, the
- * biggest file is taken to be the sharpest (some sites' are thumbnails)
+ * biggest file is taken to be the sharpest (some sites' are thumbnails).
+ * Returns the picture's bytes too when they're at hand, to store it
  */
 async function pickImage(
   like: Like,
   details: Pick<LikeDetails, 'title' | 'description' | 'sources'>,
   page: Page | undefined,
-): Promise<string | null> {
+): Promise<ChosenImage | null> {
+  // With no pick there's only the linked page's own preview image
+  const preview = async (): Promise<ChosenImage | null> => {
+    const url = page?.previewImage;
+    if (!url) return null;
+    const picture = await loadPicture(url);
+    return {
+      url,
+      picture:
+        picture && picture.data.length >= MIN_PICTURE_BYTES
+          ? picture
+          : undefined,
+    };
+  };
   const sourcePages = await Promise.all(
     details.sources.slice(0, 5).map((source) => fetchPage(source.url)),
   );
@@ -427,7 +416,7 @@ async function pickImage(
     ),
   ].filter((url): url is string => Boolean(url));
   const loaded = await Promise.all([...new Set(urls)].map(loadPicture));
-  const pictures: Picture[] = [];
+  const pictures: (Picture & { url: string })[] = [];
   let bytes = 0;
   for (const picture of loaded) {
     if (!picture || picture.data.length < MIN_PICTURE_BYTES) continue;
@@ -436,7 +425,7 @@ async function pickImage(
     bytes += picture.data.length;
     if (pictures.length === MAX_PICTURES) break;
   }
-  if (pictures.length === 0) return page?.previewImage ?? null;
+  if (pictures.length === 0) return preview();
 
   const request = {
     model: MODEL,
@@ -493,13 +482,12 @@ async function pickImage(
     },
   ).catch((error: unknown) => {
     // An image the API won't take shouldn't cost the like its details. Most
-    // candidates are just pictures on a page, so with no pick there's only
-    // the linked page's own preview image
+    // candidates are just pictures on a page
     console.error(`Could not pick an image for like ${like.id}:`, error);
     return undefined;
   });
-  if (!shown) return page?.previewImage ?? null;
-  return shown.sort((a, b) => b.data.length - a.data.length)[0]?.url ?? null;
+  if (!shown) return preview();
+  return shown.sort((a, b) => b.data.length - a.data.length)[0] ?? null;
 }
 
 async function enrichLike(like: Like): Promise<void> {
@@ -542,8 +530,18 @@ async function enrichLike(like: Like): Promise<void> {
         .filter((url) => results.has(url))
         .map((url) => ({ url, title: results.get(url)! })),
     };
-    const imageUrl = await pickImage(like, details, page);
-    await finishLike(like.id, { ...details, imageUrl });
+    const image = await pickImage(like, details, page);
+    // Saved only when the like has no image yet (finishLike keeps one it
+    // has), so a picture that wouldn't be used isn't stored
+    const imagePath =
+      image?.picture && !like.imageUrl
+        ? await uploadPicture(like.id, image.picture.data, image.picture.type)
+        : null;
+    await finishLike(like.id, {
+      ...details,
+      imageUrl: image?.url ?? null,
+      imagePath,
+    });
   } catch (error) {
     console.error(`Could not enrich like ${like.id}:`, error);
     await failLike(

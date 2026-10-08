@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 
-import type { Like, LikePatch } from '../../../shared/likes';
+import {
+  likeImage,
+  sizedPicture,
+  type Like,
+  type LikePatch,
+} from '../../../shared/likes';
 import { addPhotos, api, errorMessage, json, savedDate } from './api';
 
 interface Draft {
@@ -118,6 +123,8 @@ const LikeDetail = ({
     </label>
   );
 
+  const image = likeImage(like, 1600);
+
   return (
     <div className="likes-detail-backdrop" onMouseDown={onClose}>
       <aside
@@ -137,7 +144,11 @@ const LikeDetail = ({
           <div className="likes-detail-photos">
             {like.photoUrls.map((photoUrl, n) => (
               <figure className="likes-detail-photo" key={photoUrl}>
-                <img alt="" className="likes-detail-image" src={photoUrl} />
+                <img
+                  alt=""
+                  className="likes-detail-image"
+                  src={sizedPicture(photoUrl, 1600)}
+                />
                 <button
                   aria-label="Remove photo"
                   className="likes-photo-remove"
@@ -151,12 +162,12 @@ const LikeDetail = ({
             ))}
           </div>
         ) : (
-          like.imageUrl && (
+          image && (
             <img
               alt=""
               className="likes-detail-image"
               referrerPolicy="no-referrer"
-              src={like.imageUrl}
+              src={image}
             />
           )
         )}

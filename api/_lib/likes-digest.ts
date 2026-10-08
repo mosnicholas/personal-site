@@ -4,7 +4,7 @@
  * api/likes.ts (`?op=digest`).
  */
 
-import { likeTitle, type Like } from '../../shared/likes.js';
+import { likeImage, likeTitle, type Like } from '../../shared/likes.js';
 import { requireSql } from './db.js';
 import { escapeHtml, sendReadingEmail } from './email.js';
 import { likeFromRow } from './likes.js';
@@ -24,8 +24,9 @@ async function likesToResurface(): Promise<Like[]> {
 
 function likeHtml(like: Like): string {
   const link = `${SITE}/likes?item=${like.id}`;
-  const image = like.imageUrl
-    ? `<img src="${escapeHtml(like.imageUrl)}" alt="" style="max-width: 240px; max-height: 180px">`
+  const picture = likeImage(like, 480, true);
+  const image = picture
+    ? `<img src="${escapeHtml(picture)}" alt="" style="max-width: 240px; max-height: 180px">`
     : '';
   const note = like.note
     ? `<p style="margin: 4px 0; color: #666">Why: ${escapeHtml(like.note)}</p>`

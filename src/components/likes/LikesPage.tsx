@@ -1,12 +1,11 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 
-import { likeTitle, type Like } from '../../../shared/likes';
+import { likeImage, likeTitle, type Like } from '../../../shared/likes';
 import {
   api,
   ApiError,
   errorMessage,
   json,
-  likeImage,
   addPhotos,
   resizePhoto,
   savedDate,
@@ -206,12 +205,21 @@ const Import = ({ onImported }: { onImported: () => void }) => {
   );
 };
 
+// Pixels wide: a little more than the card shows, for sharp screens
+const CARD_WIDTH = 600;
+
 const LikeCard = ({ like, onOpen }: { like: Like; onOpen: () => void }) => {
-  const image = likeImage(like);
+  const image = likeImage(like, CARD_WIDTH);
   return (
     <button className="likes-card" onClick={onOpen} type="button">
       {image ? (
-        <img alt="" loading="lazy" referrerPolicy="no-referrer" src={image} />
+        <img
+          alt=""
+          decoding="async"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          src={image}
+        />
       ) : (
         <div className="likes-card-empty" />
       )}

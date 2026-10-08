@@ -13,12 +13,12 @@ import {
   deleteLike,
   LikeInputError,
   listLikes,
-  readPhoto,
   redoLike,
   removePhoto,
   saveLike,
   updateLike,
 } from './_lib/likes.js';
+import { storePictures } from './_lib/likes-pictures.js';
 import { loggedCron } from './_lib/traces.js';
 
 /**
@@ -26,7 +26,7 @@ import { loggedCron } from './_lib/traces.js';
  * server instead (api/mcp.ts). Everything except signing in and the crons is
  * for the owner only (_lib/owner-auth.ts).
  *
- * - GET: every like, newest first; `?op=photo&id=&n=` a like's photo `n`
+ * - GET: every like, newest first
  * - POST: save a like, JSON `{ url, text, note, list, review }`, or a form
  *   that adds one or more `photo`s (the iPhone share sheet's shortcut posts
  *   either with the owner key as a bearer: docs/save-to-likes-shortcut.plist)
@@ -41,6 +41,8 @@ import { loggedCron } from './_lib/traces.js';
  *   `?op=digest` (monthly) emails a few old ones
  * - POST `?op=realign`, signed in: the same realign now; `&dry_run=true`
  *   returns the changes without applying them
+ * - POST `?op=store-pictures`, signed in: moves pictures and photos into
+ *   Storage (_lib/likes-pictures.ts); run again until `remaining` is 0
  */
 
 async function handle(request: Request): Promise<Response> {
@@ -86,36 +88,30 @@ async function handle(request: Request): Promise<Response> {
       return Response.json(
         await realignLikes({ dryRun: params.get('dry_run') === 'true' }),
       );
+    case 'store-pictures':
+      return method === 'POST'
+        ? Response.json(await storePictures())
+        : Response.json({ error: 'Method not allowed' }, { status: 405 });
     case 'photo': {
       const n = Number(params.get('n') ?? 0);
       if (!Number.isInteger(n) || n < 0) {
         throw new LikeInputError('n is a photo number, from 0');
       }
-      if (method === 'POST' || method === 'DELETE') {
-        let like;
-        if (method === 'POST') {
-          const photo = (await request.formData()).get('photo');
-          if (!(photo instanceof File)) {
-            throw new LikeInputError('Choose a photo');
-          }
-          like = await addPhoto(id, new Uint8Array(await photo.arrayBuffer()));
-        } else {
-          like = await removePhoto(id, n);
+      let like;
+      if (method === 'POST') {
+        const photo = (await request.formData()).get('photo');
+        if (!(photo instanceof File)) {
+          throw new LikeInputError('Choose a photo');
         }
-        return like
-          ? Response.json({ like })
-          : Response.json({ error: 'Not found' }, { status: 404 });
+        like = await addPhoto(id, new Uint8Array(await photo.arrayBuffer()));
+      } else if (method === 'DELETE') {
+        like = await removePhoto(id, n);
+      } else {
+        return Response.json({ error: 'Method not allowed' }, { status: 405 });
       }
-      // The URL changes with the photo (`v`), so browsers can keep it
-      const photo = await readPhoto(id, n);
-      return photo
-        ? new Response(photo.stream, {
-            headers: {
-              'Content-Type': photo.type,
-              'Cache-Control': 'private, max-age=31536000, immutable',
-            },
-          })
-        : Response.json({ error: 'No photo' }, { status: 404 });
+      return like
+        ? Response.json({ like })
+        : Response.json({ error: 'Not found' }, { status: 404 });
     }
     case 'import': {
       const { text } = (await request.json()) as { text?: unknown };

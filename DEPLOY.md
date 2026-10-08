@@ -22,7 +22,8 @@ In Vercel project settings, add these for Production (and Preview if you want th
 | `WEEKLY_SUMMARY_RECIPIENT_EMAIL` | weekly summary email   | Your inbox (mail comes from `reader@nimo.fyi`)        |
 | `CRON_SECRET`             | both cron jobs                | Make one up: `openssl rand -hex 32 \| pbcopy`          |
 | `PERSONAL_SITE_OWNER_KEY` | `/likes` sign-in and its MCP  | Make one up: `openssl rand -hex 32 \| pbcopy`          |
-| `BLOB_READ_WRITE_TOKEN`   | `/likes` photos, locally      | Not needed on Vercel once a private Blob store is connected (see /likes) |
+| `SUPABASE_URL`            | `/likes` pictures and photos  | Supabase → Project Settings → API (project URL)        |
+| `SUPABASE_SECRET_KEY`     | `/likes` pictures and photos  | Same page; the secret key (never in the browser)       |
 
 The cron endpoints refuse requests when `CRON_SECRET` isn't set. Until `READWISE_WEBHOOK_SECRET` is set, the webhook answers Readwise but doesn't tag anything (Readwise only shows the secret after its endpoint test passes). Env var changes only apply to new deployments, so redeploy after adding one.
 
@@ -109,7 +110,7 @@ ORDER BY r.created_at, title;
 `nimo.fyi/likes` is a private collection of things I like: links, notes and photos, each given a title, description, category and tags by Claude Haiku 5.5 (which searches the web to identify products and places), plus a monthly email of a few old ones. Setup:
 
 1. Set `PERSONAL_SITE_OWNER_KEY` (above). It's the password on `/likes`, and signs the tokens Claude uses; changing it signs everything out
-2. Vercel → Storage → Create → Blob, with **private** access, connected to the project. On Vercel it authenticates with the project's OIDC token; `BLOB_READ_WRITE_TOKEN` is only needed to run it locally
+2. Supabase → Storage → New bucket `likes`, **public**, and enable image transformations (Pro plan). Set `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (above). To move pictures and photos from before this (hotlinked pictures, photos in Vercel Blob), POST `/api/likes?op=store-pictures` with the owner key as a bearer until `remaining` is 0; the Blob store can be deleted after
 3. Redeploy, open `/likes` and sign in with the key
 4. Connect Claude: Settings → Connectors → Add custom connector → `https://nimo.fyi/api/mcp`, then type the key on the page it opens. Claude can then save and update likes, search likes and reading, and read any of them in full. Claude can't hand a chat's photo to a tool, so for a photo it saves a note describing it; upload the photo itself on `/likes`
 5. Connect ChatGPT (needs developer mode: Settings → Apps & Connectors → Advanced): create a connector with the same URL and OAuth, then type the key. ChatGPT can pass photos attached in a chat, so "save this" with a photo stores the photo
@@ -213,7 +214,7 @@ personal-site/
 └── package.json
 ```
 
-All functions use the Web standard `export default { fetch(request) }` signature. Only `/api/likes` (and `/api/mcp`, which saves likes) uses Vercel packages: `@vercel/blob` for photos and `@vercel/functions` to keep organizing likes after it responds.
+All functions use the Web standard `export default { fetch(request) }` signature. Only `/api/likes` (and `/api/mcp`, which saves likes) uses Vercel packages: `@vercel/functions` to keep organizing likes after it responds.
 
 ## Troubleshooting
 

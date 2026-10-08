@@ -272,7 +272,7 @@ private struct Row: View {
       NSWorkspace.shared.open(page.url!)
     }
     .help("Open on nimo.fyi")
-    .task(id: (like.photoUrls.first ?? like.imageUrl) ?? "") {
+    .task(id: (like.photoUrls.first ?? like.pictureUrl ?? like.imageUrl) ?? "") {
       if let api = store.api { image = await Thumbnails.shared.image(for: like, api: api) }
     }
   }
