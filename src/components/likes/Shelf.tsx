@@ -61,8 +61,16 @@ const Shelf = ({
     })),
   ];
 
-  const categories = new Map<string, Like[]>();
+  // With a search or a list picked, the tiles count (and show) only what
+  // matches, and categories with nothing left drop out
+  const totals = new Map<string, number>();
   for (const like of likes) {
+    if (like.category) {
+      totals.set(like.category, (totals.get(like.category) ?? 0) + 1);
+    }
+  }
+  const categories = new Map<string, Like[]>();
+  for (const like of shown) {
     if (!like.category) continue;
     categories.set(like.category, [
       ...(categories.get(like.category) ?? []),
@@ -130,7 +138,11 @@ const Shelf = ({
                   )}
                   <span>
                     {name}
-                    <small>{inCategory.length}</small>
+                    <small>
+                      {inCategory.length}
+                      {inCategory.length < (totals.get(name) ?? 0) &&
+                        ` of ${totals.get(name)}`}
+                    </small>
                   </span>
                 </button>
               );
