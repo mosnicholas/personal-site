@@ -22,9 +22,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var item: NSStatusItem!
   private let popover = NSPopover()
   private var monitor: Any?
+  private var keys: Any?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     store.close = { [weak self] in self?.close() }
+    // A menu bar app's Edit menu is never shown, but it's what gives ⌘V, ⌘C,
+    // ⌘X and ⌘A their actions in text fields, so make sure there is one
+    NSApp.mainMenu = editMenu()
+    // ⌘V outside a text field adds what's on the clipboard. onPasteCommand
+    // only fires when a SwiftUI view has focus, which the drop zone never does
+    keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      guard let self, self.popover.isShown, self.store.key != nil,
+        event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+        event.charactersIgnoringModifiers == "v",
+        !(event.window?.firstResponder is NSText)
+      else { return event }
+      self.store.paste()
+      return nil
+    }
 
     let controller = NSHostingController(rootView: MenuView().environmentObject(store))
     controller.sizingOptions = .preferredContentSize
@@ -68,6 +83,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if let monitor { NSEvent.removeMonitor(monitor) }
     monitor = nil
   }
+}
+
+private func editMenu() -> NSMenu {
+  let edit = NSMenu(title: "Edit")
+  edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+  edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+  edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+  edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+  edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+  edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+  let menu = NSMenu()
+  menu.addItem(NSMenuItem())  // The app menu's place
+  let item = NSMenuItem()
+  item.submenu = edit
+  menu.addItem(item)
+  return menu
 }
 
 /// Covers the heart, so dragging onto it opens the popover, and dropping on
