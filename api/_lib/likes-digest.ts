@@ -13,7 +13,7 @@ const LIKES_PER_EMAIL = 5;
 const SITE = 'https://nimo.fyi';
 
 async function likesToResurface(): Promise<Like[]> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const rows = await sql`
     SELECT * FROM likes
     WHERE status = 'ready' AND created_at < now() - interval '30 days'
@@ -57,7 +57,7 @@ export async function sendLikesDigest(): Promise<{ sent: number }> {
     subject: 'Some things you liked',
     html: digestHtml(likes),
   });
-  const sql = await requireSql();
+  const sql = requireSql();
   await sql`
     UPDATE likes SET emailed_at = now()
     WHERE id = ANY(${likes.map((like) => like.id)})`;

@@ -66,10 +66,9 @@ Write 3 to 5 sentences on what these documents say together: the main ideas and 
  */
 export async function getGlossary(): Promise<Map<string, GlossaryEntry>> {
   const glossary = new Map<string, GlossaryEntry>();
-  const sqlPromise = getSql();
-  if (!sqlPromise) return glossary;
+  const sql = getSql();
+  if (!sql) return glossary;
   try {
-    const sql = await sqlPromise;
     const rows = await sql`SELECT name, definition, cluster FROM tags`;
     for (const row of rows) {
       glossary.set(row.name as string, {
@@ -90,7 +89,7 @@ export async function getGlossary(): Promise<Map<string, GlossaryEntry>> {
 export async function defineTags({ force = false } = {}): Promise<
   { tags: number; clusters: number } | { skipped: string }
 > {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [last] = await sql`SELECT max(defined_at) AS at FROM tags`;
   if (
     !force &&
@@ -205,7 +204,7 @@ export async function defineTags({ force = false } = {}): Promise<
 export async function writeBriefs(
   deadline: number,
 ): Promise<{ written: number; failed: number; remaining: number }> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const pending = await sql`
     SELECT t.name, t.definition, count(d.id) AS documents
     FROM tags t
@@ -247,7 +246,7 @@ async function writeBrief(
   definition: string | null,
   documentCount: number,
 ): Promise<void> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const documents = await sql`
     SELECT title, site_name AS site, saved_at::date::text AS saved,
       coalesce(summary, readwise_summary) AS summary, key_points

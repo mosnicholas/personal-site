@@ -137,7 +137,7 @@ export default loggedCron('update-prices', {
     let previous: PriceCheckState | undefined;
 
     try {
-      const sql = await requireSql();
+      const sql = requireSql();
       previous = await getSyncState<PriceCheckState>(PRICE_CHECK_STATE);
       const report = await checkPrices(sql);
       await setSyncState(PRICE_CHECK_STATE, {

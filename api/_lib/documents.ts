@@ -7,7 +7,7 @@
  * Readwise stays the source of truth for documents, reading state and tags;
  * the mirror lets everything else read without Readwise's 20 requests/min
  * limit. Writers that can run without a database (the webhook, the rebalance)
- * skip the mirror when DATABASE_URL isn't set.
+ * skip the mirror when SUPABASE_DATABASE_URL isn't set.
  */
 
 import { getSql, requireSql, wordPatterns } from './db.js';
@@ -28,7 +28,7 @@ export const isDocument = (article: Article) =>
  * Insert documents or refresh their Readwise fields (never our summaries)
  */
 export async function upsertDocuments(articles: Article[]): Promise<number> {
-  const sqlPromise = getSql();
+  const sql = getSql();
   const rows = articles.filter(isDocument).map((article) => ({
     id: article.id,
     title: article.title ?? '',
@@ -47,9 +47,7 @@ export async function upsertDocuments(articles: Article[]): Promise<number> {
     readwise_summary: article.summary,
     tags: articleTagNames(article),
   }));
-  if (!sqlPromise || rows.length === 0) return 0;
-
-  const sql = await sqlPromise;
+  if (!sql || rows.length === 0) return 0;
   await sql`
     INSERT INTO documents (
       id, title, author, url, source_url, site_name, category, location,
@@ -94,9 +92,8 @@ export async function upsertDocuments(articles: Article[]): Promise<number> {
 export async function setDocumentTags(
   updates: { id: string; tags: string[] }[],
 ): Promise<void> {
-  const sqlPromise = getSql();
-  if (!sqlPromise || updates.length === 0) return;
-  const sql = await sqlPromise;
+  const sql = getSql();
+  if (!sql || updates.length === 0) return;
   await sql`
     UPDATE documents d SET tags = r.tags
     FROM jsonb_to_recordset(${JSON.stringify(updates)}::jsonb)
@@ -113,9 +110,8 @@ export async function saveDocumentSummary(
   { summary, keyPoints }: OurSummary,
   version: string,
 ): Promise<void> {
-  const sqlPromise = getSql();
-  if (!sqlPromise) return;
-  const sql = await sqlPromise;
+  const sql = getSql();
+  if (!sql) return;
   await sql`
     UPDATE documents
     SET summary = ${summary}, key_points = ${JSON.stringify(keyPoints)}::jsonb,
@@ -125,7 +121,7 @@ export async function saveDocumentSummary(
 
 /** Counts a failed attempt, so a document that can't be summarized is retried a few times, not forever */
 export async function recordSummaryFailure(id: string): Promise<void> {
-  const sql = await requireSql();
+  const sql = requireSql();
   await sql`
     UPDATE documents SET summary_attempts = summary_attempts + 1
     WHERE id = ${id}`;
@@ -138,10 +134,9 @@ export async function ourSummaries(
   ids: string[],
 ): Promise<Map<string, OurSummary>> {
   const summaries = new Map<string, OurSummary>();
-  const sqlPromise = getSql();
-  if (!sqlPromise || ids.length === 0) return summaries;
+  const sql = getSql();
+  if (!sql || ids.length === 0) return summaries;
   try {
-    const sql = await sqlPromise;
     const rows = await sql`
       SELECT id, summary, key_points FROM documents
       WHERE id = ANY(${ids}) AND summary IS NOT NULL`;
@@ -159,7 +154,7 @@ export async function ourSummaries(
 
 export const MAX_SUMMARY_ATTEMPTS = 3;
 // Books can run to millions of characters; this keeps one from eating the
-// free plan's 1 GB
+// plan's disk
 const MAX_STORED_TEXT_CHARS = 1_000_000;
 
 export interface DocumentToSummarize {
@@ -179,7 +174,7 @@ export async function documentsNeedingSummary(
   limit: number,
   redo = false,
 ): Promise<DocumentToSummarize[]> {
-  const sql = await requireSql();
+  const sql = requireSql();
   return (await sql`
     SELECT id, title, author, site_name AS site, category FROM documents
     WHERE (summary IS NULL
@@ -194,7 +189,7 @@ export async function countDocumentsNeedingSummary(
   version: string,
   redo = false,
 ): Promise<number> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`
     SELECT count(*) AS count FROM documents
     WHERE (summary IS NULL
@@ -208,9 +203,8 @@ export async function saveDocumentText(
   id: string,
   text: string,
 ): Promise<void> {
-  const sqlPromise = getSql();
-  if (!sqlPromise) return;
-  const sql = await sqlPromise;
+  const sql = getSql();
+  if (!sql) return;
   const stored = text.slice(0, MAX_STORED_TEXT_CHARS);
   await sql`
     INSERT INTO document_texts (id, text, chars, truncated, fetched_at)
@@ -221,7 +215,7 @@ export async function saveDocumentText(
 }
 
 export async function getDocumentText(id: string): Promise<string | undefined> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`SELECT text FROM document_texts WHERE id = ${id}`;
   return row?.text as string | undefined;
 }
@@ -236,10 +230,9 @@ export async function documentTexts(
   budgetChars: number,
 ): Promise<Map<string, string>> {
   const texts = new Map<string, string>();
-  const sqlPromise = getSql();
-  if (!sqlPromise || ids.length === 0) return texts;
+  const sql = getSql();
+  if (!sql || ids.length === 0) return texts;
   try {
-    const sql = await sqlPromise;
     const sizes = await sql`
       SELECT id, length(text) AS chars FROM document_texts
       WHERE id = ANY(${ids}) ORDER BY length(text), id`;
@@ -273,10 +266,9 @@ export interface TagInUse {
  * unavailable
  */
 export async function tagsInUse(): Promise<TagInUse[] | undefined> {
-  const sqlPromise = getSql();
-  if (!sqlPromise) return undefined;
+  const sql = getSql();
+  if (!sql) return undefined;
   try {
-    const sql = await sqlPromise;
     const rows = await sql`
       SELECT tag AS name, count(*) AS documents, max(t.definition) AS definition
       FROM documents d
@@ -344,7 +336,7 @@ export async function searchDocuments({
   limit?: number;
   offset?: number;
 }): Promise<SavedDocument[]> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const rows = await sql`
     SELECT id, title, author, site_name, coalesce(source_url, url) AS url,
       saved_at::date::text AS saved, location, reading_progress, tags,
@@ -365,7 +357,7 @@ export async function searchDocuments({
 export async function getSavedDocument(
   id: string,
 ): Promise<(SavedDocument & { text: string | null }) | undefined> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`
     SELECT d.id, d.title, d.author, d.site_name,
       coalesce(d.source_url, d.url) AS url, d.saved_at::date::text AS saved,
@@ -380,7 +372,7 @@ export async function getSavedDocument(
 }
 
 export async function getSyncState<T>(name: string): Promise<T | undefined> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`SELECT value FROM sync_state WHERE name = ${name}`;
   return row?.value as T | undefined;
 }
@@ -389,7 +381,7 @@ export async function setSyncState(
   name: string,
   value: unknown,
 ): Promise<void> {
-  const sql = await requireSql();
+  const sql = requireSql();
   await sql`
     INSERT INTO sync_state (name, value, updated_at)
     VALUES (${name}, ${JSON.stringify(value)}::jsonb, now())

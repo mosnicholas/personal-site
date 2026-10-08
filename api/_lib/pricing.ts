@@ -5,7 +5,8 @@
  * Prices live in the `model_prices` table, one row per model per price
  * change, each with the date it took effect, so a call is always priced at
  * the rate that applied when it was made. The daily price check
- * (prices-check.ts) keeps the table in line with Anthropic's pricing page.
+ * (prices-check.ts) keeps the table in line with Anthropic's pricing page, and
+ * adds every listed model when the table is empty.
  */
 
 import type { Sql } from './db.js';
@@ -38,45 +39,6 @@ export interface PriceRow extends Price {
   /** First day (UTC, YYYY-MM-DD) these prices apply */
   effectiveFrom: string;
 }
-
-/**
- * The prices the table starts with: the models this site used when prices
- * moved into the database, from
- * https://platform.claude.com/docs/en/about-claude/pricing on 2026-10-02.
- * The price check adds every other listed model on its first run.
- */
-export const SEED_PRICES: PriceRow[] = [
-  {
-    model: 'claude-opus-5-5',
-    effectiveFrom: '2026-10-02',
-    input: 4,
-    output: 20,
-    cacheWrite5m: 5,
-    cacheWrite1h: 8,
-    cacheRead: 0.2,
-    webSearch: 10,
-  },
-  {
-    model: 'claude-sonnet-5-5',
-    effectiveFrom: '2026-10-02',
-    input: 2,
-    output: 10,
-    cacheWrite5m: 2.5,
-    cacheWrite1h: 4,
-    cacheRead: 0.2,
-    webSearch: 10,
-  },
-  {
-    model: 'claude-haiku-4-5',
-    effectiveFrom: '2026-10-02',
-    input: 1,
-    output: 5,
-    cacheWrite5m: 1.25,
-    cacheWrite1h: 2,
-    cacheRead: 0.1,
-    webSearch: 10,
-  },
-];
 
 /**
  * The model a price row is keyed by: dated IDs (claude-haiku-4-5-20251001)

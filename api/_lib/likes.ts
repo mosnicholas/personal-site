@@ -88,13 +88,13 @@ export const isHttpUrl = (value: string) => {
 
 /** Every like, newest first */
 export async function listLikes(): Promise<Like[]> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const rows = await sql`SELECT * FROM likes ORDER BY created_at DESC`;
   return rows.map(likeFromRow);
 }
 
 export async function getLike(id: string): Promise<Like | undefined> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`SELECT * FROM likes WHERE id = ${id}`;
   return row ? likeFromRow(row) : undefined;
 }
@@ -114,7 +114,7 @@ export async function searchLikes({
   limit?: number;
   offset?: number;
 }): Promise<Like[]> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const rows = await sql`
     SELECT * FROM likes
     WHERE (${since ?? null}::date IS NULL OR created_at >= ${since ?? null}::date)
@@ -150,7 +150,7 @@ export async function saveLike(like: NewLike): Promise<Like> {
     throw new LikeInputError('Add a link, some text, or a photo');
   }
 
-  const sql = await requireSql();
+  const sql = requireSql();
   if (url) {
     const [existing] = await sql`
       UPDATE likes SET list = coalesce(${list}, list),
@@ -217,7 +217,7 @@ export async function updateLike(
   const tags = Array.isArray(patch.tags)
     ? patch.tags.map(text).filter((tag): tag is string => Boolean(tag))
     : null;
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`
     UPDATE likes SET
       title = coalesce(${text(patch.title)}, title),
@@ -234,7 +234,7 @@ export async function updateLike(
 }
 
 export async function deleteLike(id: string): Promise<boolean> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`DELETE FROM likes WHERE id = ${id} RETURNING photos`;
   const photos = (row?.photos ?? []) as string[];
   if (photos.length) await del(photos);
@@ -247,7 +247,7 @@ export async function deleteLike(id: string): Promise<boolean> {
  * as they are now
  */
 export async function redoLike(id: string): Promise<Like | undefined> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`
     UPDATE likes SET title = '', description = '', category = NULL,
       tags = '{}', image_url = NULL, sources = '[]', status = 'pending',
@@ -264,7 +264,7 @@ export async function addPhoto(
 ): Promise<Like | undefined> {
   if (!(await getLike(id))) return undefined;
   const url = await savePhoto(id, photo);
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`
     UPDATE likes SET photos = array_append(photos, ${url})
     WHERE id = ${id}
@@ -277,7 +277,7 @@ export async function removePhoto(
   id: string,
   n: number,
 ): Promise<Like | undefined> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [old] = await sql`SELECT photos FROM likes WHERE id = ${id}`;
   const url = (old?.photos as string[] | undefined)?.[n];
   if (!url) return undefined;
@@ -294,7 +294,7 @@ export async function readPhoto(
   id: string,
   n: number,
 ): Promise<{ stream: ReadableStream<Uint8Array>; type: string } | undefined> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [row] = await sql`
     SELECT photos[${n + 1}::int] AS photo FROM likes WHERE id = ${id}`;
   if (!row?.photo) return undefined;
@@ -318,7 +318,7 @@ export interface LikeCategory {
  * enrichment can see what each holds and reuse their tags
  */
 export async function likeCategories(): Promise<LikeCategory[]> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const rows = await sql`
     SELECT category AS name, count(*)::int AS likes,
       (array_agg(COALESCE(NULLIF(title, ''), left(text, 80))
@@ -344,7 +344,7 @@ export async function likeCategories(): Promise<LikeCategory[]> {
  * one waits to be tried again (3 tries in all)
  */
 export async function claimLikes(limit: number): Promise<Like[]> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const rows = await sql`
     UPDATE likes SET claimed_at = now(), attempts = attempts + 1
     WHERE id IN (
@@ -363,7 +363,7 @@ export async function claimLikes(limit: number): Promise<Like[]> {
  * sources found before ("Organize again" clears those first)
  */
 export async function finishLike(id: string, details: LikeDetails) {
-  const sql = await requireSql();
+  const sql = requireSql();
   await sql`
     UPDATE likes SET
       title = CASE WHEN title = '' THEN ${details.title} ELSE title END,
@@ -379,7 +379,7 @@ export async function finishLike(id: string, details: LikeDetails) {
 }
 
 export async function failLike(id: string, error: string) {
-  const sql = await requireSql();
+  const sql = requireSql();
   await sql`UPDATE likes SET status = 'failed', error = ${error} WHERE id = ${id}`;
 }
 

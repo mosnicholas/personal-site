@@ -5,10 +5,10 @@
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 
-import { neon } from '@neondatabase/serverless';
+import postgres from 'postgres';
 
 // Never let an eval script write to the production trace log
-delete process.env.DATABASE_URL;
+delete process.env.SUPABASE_DATABASE_URL;
 
 /** Everything a run produces lives here; gitignored, since it holds full texts */
 export const runPath = (run: string, file = '') =>
@@ -53,7 +53,7 @@ export function readonlySql() {
   const encoded = /%[0-9a-f]{2}/i.test(password)
     ? password
     : encodeURIComponent(password);
-  return neon(`${head}${encoded}${tail}`);
+  return postgres(`${head}${encoded}${tail}`, { prepare: false });
 }
 
 export const countWords = (text: string) =>

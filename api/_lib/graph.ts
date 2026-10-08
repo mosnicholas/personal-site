@@ -54,7 +54,7 @@ export const clusterId = (label: string) =>
     .replace(/^-|-$/g, '');
 
 export async function readingGraph(): Promise<ReadingGraph> {
-  const sql = await requireSql();
+  const sql = requireSql();
 
   const [[totals], tagRows, edgeRows, clusterRows, weekRows] =
     await Promise.all([
@@ -148,7 +148,7 @@ export async function readingGraph(): Promise<ReadingGraph> {
 }
 
 export async function tagDetail(name: string): Promise<TagDetail | undefined> {
-  const sql = await requireSql();
+  const sql = requireSql();
   const [[tag], documents] = await Promise.all([
     sql`
       SELECT ${name}::text AS name, count(d.id) AS documents,

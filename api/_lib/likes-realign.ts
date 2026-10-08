@@ -82,7 +82,7 @@ const same = (a: Organized, b: Organized) =>
  * without applying them
  */
 export async function realignLikes({ dryRun = false } = {}) {
-  const sql = await requireSql();
+  const sql = requireSql();
   const rows = await sql`
     SELECT id, COALESCE(NULLIF(title, ''), left(text, 120)) AS title,
       description, category, tags

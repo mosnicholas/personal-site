@@ -41,7 +41,7 @@ Press `~` (or `t`) on the landing page, or visit `?mode=terminal`, to unlock:
 - **Vercel Functions** - Backend API (`/api`)
 - **Anthropic Claude** - Haiku 5.5 for terminal chat and tagging, Sonnet 5.5 for document summaries and tag briefs, Opus 5.5 for tag rebalancing, the glossary and reading emails
 - **Resend** - Weekly summary email
-- **Neon Postgres** - LLM trace log
+- **Supabase Postgres** - LLM trace log, reading mirror, likes
 - **Share Tech Mono** - Cool terminal font
 
 ## Quick Start

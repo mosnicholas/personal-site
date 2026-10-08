@@ -4,7 +4,7 @@
  * Also a log of other events worth checking later (`logEvent`).
  *
  * Stored in Postgres (see db.ts). Tracing never breaks the caller: without
- * DATABASE_URL, or if a write fails, it logs and moves on.
+ * SUPABASE_DATABASE_URL, or if a write fails, it logs and moves on.
  */
 
 import { rejectUnauthorizedCron } from './auth.js';
@@ -60,7 +60,7 @@ export async function logEvent(event: {
   error?: string;
 }): Promise<void> {
   try {
-    const sql = await getSql();
+    const sql = getSql();
     if (!sql) return;
     await sql`
       INSERT INTO event_log (kind, subject_id, detail, error)
@@ -141,15 +141,16 @@ export function loggedCron(
 
 export async function recordTrace(trace: Trace): Promise<void> {
   try {
-    const sqlPromise = getSql();
-    if (!sqlPromise) {
+    const sql = getSql();
+    if (!sql) {
       if (!warnedMissingUrl) {
-        console.warn('DATABASE_URL is not set - LLM traces are not saved');
+        console.warn(
+          'SUPABASE_DATABASE_URL is not set - LLM traces are not saved',
+        );
         warnedMissingUrl = true;
       }
       return;
     }
-    const sql = await sqlPromise;
     // Token counts and cost exactly as the API reported them, as columns
     const response = trace.response as
       { model?: string; usage?: Usage } | undefined;
@@ -203,10 +204,9 @@ export async function recordTrace(trace: Trace): Promise<void> {
  */
 export async function loadAppliedRenames(): Promise<Map<string, string>> {
   const renames = new Map<string, string>();
-  const sqlPromise = getSql();
-  if (!sqlPromise) return renames;
+  const sql = getSql();
+  if (!sql) return renames;
   try {
-    const sql = await sqlPromise;
     const rows = await sql`
       SELECT result->'renames' AS renames FROM llm_traces
       WHERE kind = 'rebalance' AND result ? 'renames'
@@ -235,29 +235,26 @@ export async function loadAppliedRenames(): Promise<Map<string, string>> {
 // The price check runs daily; a few missed days means it stopped
 const PRICE_CHECK_STALE_MS = 3 * 24 * 60 * 60 * 1000;
 
-// Neon's free plan blocks writes past 1 GB per project and doesn't warn first
-const STORAGE_LIMIT_BYTES = 1024 ** 3;
+// Supabase Pro includes 8 GB of disk; past that the disk grows and is billed
+const STORAGE_LIMIT_BYTES = 8 * 1024 ** 3;
 const STORAGE_WARN_RATIO = 0.8;
 
 const count = (n: unknown, noun: string) =>
   `${Number(n).toLocaleString('en-US')} ${noun}${Number(n) === 1 ? '' : 's'}`;
 
 /**
- * A few lines for the weekly email: how full the database is (Neon gives no
- * warning), what the LLM calls cost this week, any calls from a model with
+ * A few lines for the weekly email: how big the database is against the
+ * 8 GB the plan includes, what the LLM calls cost this week, any calls from a model with
  * no price, whose cost would otherwise go uncounted, and whether the daily
  * price check is working
  */
 export async function describeTraceLog(): Promise<string> {
-  const sqlPromise = getSql();
-  if (!sqlPromise) return 'LLM trace log is off: DATABASE_URL is not set.';
+  const sql = getSql();
+  if (!sql) return 'LLM trace log is off: SUPABASE_DATABASE_URL is not set.';
   try {
-    const sql = await sqlPromise;
-    // Neon's 1 GB counts every database in the project, not just ours
     const [row] = await sql`
       SELECT
-        (SELECT sum(pg_database_size(datname)) FROM pg_database
-          WHERE has_database_privilege(datname, 'CONNECT')) AS bytes,
+        pg_database_size(current_database()) AS bytes,
         (SELECT count(*) FROM llm_traces) AS calls,
         (SELECT count(*) FROM llm_traces
           WHERE created_at > now() - interval '7 days') AS week_calls,
@@ -269,13 +266,13 @@ export async function describeTraceLog(): Promise<string> {
         (SELECT value FROM sync_state
           WHERE name = ${PRICE_CHECK_STATE}) AS price_check`;
     const bytes = Number(row.bytes);
-    const storage = `${Math.round(bytes / 1024 ** 2)} MB of 1 GB (${Math.round(
+    const storage = `${(bytes / 1024 ** 3).toFixed(2)} GB of the 8 GB included (${Math.round(
       (bytes / STORAGE_LIMIT_BYTES) * 100,
     )}%), ${count(row.calls, 'LLM call')}`;
     const lines = [
       bytes < STORAGE_LIMIT_BYTES * STORAGE_WARN_RATIO
         ? `LLM trace log: ${storage}.`
-        : `LLM trace log is nearly full: ${storage}. New traces stop saving at 1 GB; delete old chat traces or upgrade the Neon plan.`,
+        : `The database is nearly past what the plan includes: ${storage}. Beyond 8 GB Supabase bills for the extra disk; delete old chat traces to stay under.`,
       `AI spend in the last 7 days: $${Number(row.week_usd).toFixed(2)} over ${count(row.week_calls, 'call')}.`,
     ];
     if (row.unpriced) {

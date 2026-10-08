@@ -15,7 +15,7 @@ In Vercel project settings, add these for Production (and Preview if you want th
 | Variable                  | Used by                       | Where to get it                                       |
 | ------------------------- | ----------------------------- | ----------------------------------------------------- |
 | `ANTHROPIC_API_KEY`       | chat, tagging, rebalance, summary | https://console.anthropic.com/                    |
-| `DATABASE_URL`            | LLM trace log                 | Set automatically by the Neon integration (below)     |
+| `SUPABASE_DATABASE_URL`   | everything stored (below)     | Supabase → Connect → Transaction pooler (port 6543)   |
 | `READWISE_API_KEY`        | webhook + weekly summary      | https://readwise.io/access_token                       |
 | `READWISE_WEBHOOK_SECRET` | `/api/readwise-webhook`       | Readwise generates it (step 5)                        |
 | `RESEND_API_KEY`          | weekly summary email          | Resend → API Keys (see "Email setup" below)           |
@@ -77,7 +77,7 @@ Readwise stays the source of truth, and Postgres keeps a mirror of the library (
   ```bash
   curl -H "Authorization: Bearer $CRON_SECRET" "https://<your-domain>/api/sync-documents"
   ```
-  Summaries cost a few cents per document (Sonnet 5.5 reads the whole text, up to ~150k tokens). Texts take roughly 25 KB per document of the 1 GB.
+  Summaries cost a few cents per document (Sonnet 5.5 reads the whole text, up to ~150k tokens). Texts take roughly 25 KB per document.
 
 ## Tagging and the knowledge graph
 
@@ -88,7 +88,7 @@ Readwise holds the taxonomy: it's the set of tags in use.
 - **Glossary** (`/api/tag-glossary`, Sundays 8am UTC, after the cleanup): Claude Opus 5.5 writes a one-line definition for every tag used by two or more documents (what it covers, and what it doesn't when a neighbor is close) and sorts them into 6-12 named clusters, keeping last week's where they still fit. The tagger reads the definitions. Claude Sonnet 5.5 then writes a brief for each tag with 3+ saved documents whose count changed. Reruns within 6 days only continue the briefs (`?redefine=true` redoes the definitions).
 - **Merges stick:** each run reads earlier runs' merges from the trace log. They're shown to Opus, a retired tag that comes back is folded into its replacement without asking, and a plan can't merge a tag back into one it replaced (the first backfill flipped `ux-design` and `user-experience` between two runs).
 
-To see every change a rebalance made, in the Neon SQL editor:
+To see every change a rebalance made, in the Supabase SQL editor:
 
 ```sql
 SELECT r.created_at::date AS run,
@@ -124,7 +124,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" "https://nimo.fyi/api/likes?op=proc
 
 `/api/reading-synthesis` runs on the 1st of each month at 10am UTC and emails a synthesis of everything saved to the library in the last 90 days, so each month's email shows the longer arc (`?days=` from 1 to 183 for a one-off over another window). The first one, over 92 days with 89 documents, took about 3 minutes. Claude Opus 5.5 gets each document's title, source, date, tags, our summary (Readwise's where we don't have one), how far you got, your notes and highlights, and the full text of as many documents as fit in about 120k tokens (shortest first), and writes: the short version, the themes across everything, how the reading changed over the window, its own meta observations, what's worth reading in full, and questions to sit with. Feed items are left out unless saved to the library. It has to finish inside the 300s function limit, so if a long window times out, use a shorter one.
 
-## LLM trace log (Neon Postgres, free)
+## Database and LLM trace log (Supabase Postgres)
 
 Every LLM call (chat, document summaries, tagging, rebalance, glossary, tag briefs, weekly summary, reading synthesis) is saved to an `llm_traces` table: the exact request, the full response, what the app did with it (tags written, rebalance changes, email subject and article ids), latency, errors, and the git commit. That's enough to replay the same inputs against another model and compare. Each row also has the token counts the API reported (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`) and `cost_usd`, priced with cache writes and reads at their own rates, so spend adds up directly:
 
@@ -134,16 +134,19 @@ FROM llm_traces WHERE created_at > now() - interval '7 days'
 GROUP BY 1, 2 ORDER BY usd DESC NULLS LAST;
 ```
 
-1. Vercel → your project → Storage → Create Database → Neon → Free plan → connect it to the project. This sets `DATABASE_URL`
-2. Redeploy. The tables (`llm_traces`, `model_prices`, `documents`, `document_texts`, `tags`, `sync_state`) are created on first use
-3. Query it in the Neon console's SQL editor, e.g.
+Everything the site stores (the trace log, model prices, the library mirror and texts, the glossary, likes, the event log) is in one Supabase Postgres project on the Pro plan (always on, in us-east-1 next to the Vercel functions). It moved from Neon's free plan in October 2026, where the database slept after 5 idle minutes and the first query after that waited for it to wake.
+
+1. Create a Supabase project in East US (N. Virginia)
+2. Put its transaction pooler URL (port 6543) in Vercel as `SUPABASE_DATABASE_URL`, and both pooler URLs in `.env.local` (`SUPABASE_DATABASE_URL`, and `SUPABASE_SESSION_URL` on port 5432)
+3. `npm run db:migrate` creates the tables from `db/migrations`; later schema changes are new files there, applied the same way before deploying code that needs them
+4. Query it in the Supabase SQL editor, e.g.
    ```sql
    SELECT created_at, subject_id, result FROM llm_traces WHERE kind = 'tagging' ORDER BY created_at DESC;
    ```
 
-Neon's free plan has 1 GB of storage and 100 CU-hours of compute a month: the database suspends after 5 idle minutes and only counts while awake, and at its smallest size (0.25 CU) 100 CU-hours is about 400 awake hours. This site wakes it for the daily sync, each save, chat messages, the weekly jobs and uncached `/reading` requests, which comes to roughly 5-10 CU-hours a month. If it ever runs out, the database is off until the next month (tagging falls back to Readwise's tag list; traces, `/reading` and summaries stop), and the Neon console shows usage under Monitoring. The first query after a suspend takes about half a second longer. Chat traces include what visitors typed (never their IP).
+Every table has row level security on with no policies, so Supabase's Data API can't read them; the site connects as the `postgres` role. Chat traces include what visitors typed (never their IP).
 
-Neon doesn't warn before the 1 GB fills up, so the weekly email ends with a line saying how full the database is (all databases in the project, which is what Neon counts), which turns into a warning at 80%. The same line gives the week's AI spend, names any model that answered without a price (its calls would otherwise cost $0 in the log), and warns if the daily price check is failing. Measured sizes: about 3 KB per tagged document, 6 KB per chat message, and 25 KB a week for the rebalance and summary together. If it does fill, new traces stop saving and everything else keeps working; delete old chat traces (`DELETE FROM llm_traces WHERE kind = 'chat' AND created_at < now() - interval '90 days'`) or move to a paid plan.
+Pro includes 8 GB of disk and bills for more, so the weekly email ends with a line saying how full the database is, which turns into a warning at 80%. The same line gives the week's AI spend, names any model that answered without a price (its calls would otherwise cost $0 in the log), and warns if the daily price check is failing. Measured sizes: about 3 KB per tagged document, 6 KB per chat message, and 25 KB a week for the rebalance and summary together. To make room, delete old chat traces (`DELETE FROM llm_traces WHERE kind = 'chat' AND created_at < now() - interval '90 days'`).
 
 ### Model prices
 
