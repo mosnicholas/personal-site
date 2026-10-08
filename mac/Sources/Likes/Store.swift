@@ -9,6 +9,8 @@ final class Store: ObservableObject {
   @Published var draft = Draft()
   @Published var saving: String?
   @Published var error: String?
+  /// Closes the popover (AppDelegate)
+  var close: () -> Void = {}
 
   /// How many recent likes the menu shows
   static let recentCount = 8
@@ -61,7 +63,7 @@ final class Store: ObservableObject {
   }
 
   func paste() {
-    draft.addClipboard()
+    draft.add(from: .general)
   }
 
   func choosePhotos() {

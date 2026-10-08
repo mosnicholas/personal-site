@@ -101,9 +101,9 @@ extension Draft {
     }
   }
 
-  /// What's on the clipboard: images, links, or text
-  mutating func addClipboard() {
-    let board = NSPasteboard.general
+  /// What's on a pasteboard (the clipboard, or a drag onto the menu bar
+  /// icon): images, links, or text
+  mutating func add(from board: NSPasteboard) {
     if let urls = board.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
       for url in urls {
         if url.isFileURL {

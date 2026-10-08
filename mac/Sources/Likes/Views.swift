@@ -24,6 +24,7 @@ struct MenuView: View {
     .padding(14)
     .frame(width: 340)
     .onPasteCommand(of: [.fileURL, .url, .image, .plainText]) { _ in store.paste() }
+    .onExitCommand { store.close() }
   }
 }
 
