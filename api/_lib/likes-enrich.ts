@@ -464,7 +464,8 @@ async function pickImage(
       },
     ],
   };
-  // The trace keeps the URLs of the pictures that show it, not their bytes
+  // The trace keeps every candidate (URL, type, size) and the ones Haiku
+  // said show it, so a pick can be checked again later; never the bytes
   const shownUrls = await tracedCall(
     {
       kind: 'likes_enrichment',
@@ -479,16 +480,25 @@ async function pickImage(
       );
       const numbers =
         (call?.input as { pictures: number[] } | undefined)?.pictures ?? [];
-      return pictures
-        .filter((_, i) => numbers.includes(i + 1))
-        .map((picture) => picture.url);
+      return {
+        candidates: pictures.map(({ url, type, data }) => ({
+          url,
+          type,
+          bytes: data.length,
+        })),
+        shown: pictures
+          .filter((_, i) => numbers.includes(i + 1))
+          .map((picture) => picture.url),
+      };
     },
-  ).catch((error: unknown) => {
-    // An image the API won't take shouldn't cost the like its details. Most
-    // candidates are just pictures on a page
-    console.error(`Could not pick an image for like ${like.id}:`, error);
-    return undefined;
-  });
+  )
+    .then((result) => result.shown)
+    .catch((error: unknown) => {
+      // An image the API won't take shouldn't cost the like its details. Most
+      // candidates are just pictures on a page
+      console.error(`Could not pick an image for like ${like.id}:`, error);
+      return undefined;
+    });
   if (!shownUrls) return preview();
   return (
     pictures
