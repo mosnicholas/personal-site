@@ -276,6 +276,46 @@
   margin: 10px 0 18px;
 }
 
+/* Photos side by side, swiped through; the next one peeks in */
+.likes-detail-photos {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 18px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+}
+
+.likes-detail-photo {
+  position: relative;
+  flex: 0 0 100%;
+  margin: 0;
+  scroll-snap-align: start;
+}
+
+.likes-detail-photo:not(:only-child) {
+  flex-basis: 85%;
+}
+
+.likes-detail-photo .likes-detail-image {
+  display: block;
+  margin: 0;
+}
+
+.likes-detail-photo:not(:only-child) .likes-detail-image {
+  height: 310px;
+}
+
+.likes-page .likes-photo-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 9px;
+  border-color: transparent;
+  background: rgb(0 0 0 / 60%);
+  font-size: 1.1rem;
+  line-height: 1.2;
+}
+
 .likes-text {
   margin-top: 12px;
   color: var(--likes-soft);

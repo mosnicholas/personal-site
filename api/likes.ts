@@ -8,12 +8,13 @@ import {
   processLikesLater,
 } from './_lib/likes-enrich.js';
 import {
+  addPhoto,
   deleteLike,
   LikeInputError,
   listLikes,
   readPhoto,
   redoLike,
-  replacePhoto,
+  removePhoto,
   saveLike,
   updateLike,
 } from './_lib/likes.js';
@@ -24,14 +25,15 @@ import { loggedCron } from './_lib/traces.js';
  * server instead (api/mcp.ts). Everything except signing in and the crons is
  * for the owner only (_lib/owner-auth.ts).
  *
- * - GET: every like, newest first; `?op=photo&id=` a like's photo
+ * - GET: every like, newest first; `?op=photo&id=&n=` a like's photo `n`
  * - POST: save a like, JSON `{ url, text, note, list, review }`, or a form
- *   that adds a `photo` (the iPhone share sheet's shortcut posts JSON with
- *   the owner key as a bearer: docs/save-to-likes-shortcut.plist)
+ *   that adds one or more `photo`s (the iPhone share sheet's shortcut posts
+ *   either with the owner key as a bearer: docs/save-to-likes-shortcut.plist)
  * - POST `?op=import` `{ text }`: split pasted notes into likes
  * - PATCH `?id=` (a LikePatch), DELETE `?id=`
  * - POST `?op=redo&id=`: organize a like again, from my note and photo
- * - POST `?op=photo&id=` (a form with `photo`): add or replace its photo
+ * - POST `?op=photo&id=` (a form with `photo`): add a photo after its others;
+ *   DELETE `?op=photo&id=&n=` removes photo `n`
  * - POST `?op=login` `{ key }`, POST `?op=logout`
  * - Crons: `?op=process` (daily) enriches likes left waiting; `?op=digest`
  *   (monthly) emails a few old ones
@@ -71,21 +73,27 @@ async function handle(request: Request): Promise<Response> {
 
   switch (op) {
     case 'photo': {
-      if (method === 'POST') {
-        const photo = (await request.formData()).get('photo');
-        if (!(photo instanceof File)) {
-          throw new LikeInputError('Choose a photo');
+      const n = Number(params.get('n') ?? 0);
+      if (!Number.isInteger(n) || n < 0) {
+        throw new LikeInputError('n is a photo number, from 0');
+      }
+      if (method === 'POST' || method === 'DELETE') {
+        let like;
+        if (method === 'POST') {
+          const photo = (await request.formData()).get('photo');
+          if (!(photo instanceof File)) {
+            throw new LikeInputError('Choose a photo');
+          }
+          like = await addPhoto(id, new Uint8Array(await photo.arrayBuffer()));
+        } else {
+          like = await removePhoto(id, n);
         }
-        const like = await replacePhoto(
-          id,
-          new Uint8Array(await photo.arrayBuffer()),
-        );
         return like
           ? Response.json({ like })
           : Response.json({ error: 'Not found' }, { status: 404 });
       }
       // The URL changes with the photo (`v`), so browsers can keep it
-      const photo = await readPhoto(id);
+      const photo = await readPhoto(id, n);
       return photo
         ? new Response(photo.stream, {
             headers: {
@@ -129,17 +137,18 @@ async function handle(request: Request): Promise<Response> {
           )
         : await request.json()
     ) as Record<string, string | undefined>;
-    const photo = form?.get('photo');
+    const photos = (form?.getAll('photo') ?? []).filter(
+      (photo) => photo instanceof File,
+    );
     const like = await saveLike({
       url: fields.url,
       text: fields.text,
       note: fields.note,
       list: fields.list,
       review: fields.review,
-      photo:
-        photo instanceof File
-          ? new Uint8Array(await photo.arrayBuffer())
-          : undefined,
+      photos: await Promise.all(
+        photos.map(async (photo) => new Uint8Array(await photo.arrayBuffer())),
+      ),
       source: 'web',
     });
     processLikesLater();

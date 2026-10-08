@@ -13,8 +13,11 @@ export interface Like {
   list: string | null;
   /** What I thought of it, once I've been or tried it */
   review: string;
-  /** Where /likes loads the photo from; it changes when the photo does */
-  photoUrl: string | null;
+  /**
+   * Where /likes loads my photos from, the first one the cover; each URL
+   * changes when its photo does
+   */
+  photoUrls: string[];
   /** Filled in by enrichment unless I set them first */
   title: string;
   description: string;

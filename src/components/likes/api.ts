@@ -34,8 +34,8 @@ export const json = (method: string, body: unknown): RequestInit => ({
 export const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong';
 
-/** The like's photo, or its page's preview image */
-export const likeImage = (like: Like) => like.photoUrl ?? like.imageUrl;
+/** The like's first photo, or its page's preview image */
+export const likeImage = (like: Like) => like.photoUrls[0] ?? like.imageUrl;
 
 export const savedDate = (like: Like) =>
   new Date(like.createdAt).toLocaleDateString(undefined, {
@@ -63,4 +63,16 @@ export async function resizePhoto(file: File): Promise<Blob> {
       0.85,
     ),
   );
+}
+
+/**
+ * Adds photos to a like after its others, one request each: several at once
+ * could go over Vercel's 4.5 MB limit
+ */
+export async function addPhotos(id: string, files: File[]) {
+  for (const file of files) {
+    const body = new FormData();
+    body.set('photo', await resizePhoto(file), 'photo.jpg');
+    await api(`?op=photo&id=${id}`, { method: 'POST', body });
+  }
 }

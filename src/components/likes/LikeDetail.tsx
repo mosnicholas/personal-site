@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import type { Like, LikePatch } from '../../../shared/likes';
-import {
-  api,
-  errorMessage,
-  json,
-  likeImage,
-  resizePhoto,
-  savedDate,
-} from './api';
+import { addPhotos, api, errorMessage, json, savedDate } from './api';
 
 interface Draft {
   title: string;
@@ -43,7 +36,6 @@ const LikeDetail = ({
   const [draft, setDraft] = useState(() => draftOf(like));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const image = likeImage(like);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -99,10 +91,9 @@ const LikeDetail = ({
     await api(`?op=redo&id=${like.id}`, { method: 'POST' });
   };
 
-  const uploadPhoto = async (file: File) => {
-    const body = new FormData();
-    body.set('photo', await resizePhoto(file), 'photo.jpg');
-    await api(`?op=photo&id=${like.id}`, { method: 'POST', body });
+  const removePhoto = (n: number) => {
+    if (!window.confirm('Remove this photo?')) return;
+    void run(() => api(`?op=photo&id=${like.id}&n=${n}`, { method: 'DELETE' }));
   };
 
   const field = (name: keyof Draft, label: string, rows = 0) => (
@@ -142,13 +133,32 @@ const LikeDetail = ({
         >
           ×
         </button>
-        {image && (
-          <img
-            alt=""
-            className="likes-detail-image"
-            referrerPolicy="no-referrer"
-            src={image}
-          />
+        {like.photoUrls.length > 0 ? (
+          <div className="likes-detail-photos">
+            {like.photoUrls.map((photoUrl, n) => (
+              <figure className="likes-detail-photo" key={photoUrl}>
+                <img alt="" className="likes-detail-image" src={photoUrl} />
+                <button
+                  aria-label="Remove photo"
+                  className="likes-photo-remove"
+                  disabled={busy}
+                  onClick={() => removePhoto(n)}
+                  type="button"
+                >
+                  ×
+                </button>
+              </figure>
+            ))}
+          </div>
+        ) : (
+          like.imageUrl && (
+            <img
+              alt=""
+              className="likes-detail-image"
+              referrerPolicy="no-referrer"
+              src={like.imageUrl}
+            />
+          )
         )}
         <p className="likes-meta">
           {like.category ?? 'uncategorized'} · saved {savedDate(like)} from{' '}
@@ -227,19 +237,21 @@ const LikeDetail = ({
           <button
             disabled={busy}
             onClick={() => void run(organizeAgain)}
-            title="Rewrites the title, description, category and tags, going by your note and photo"
+            title="Rewrites the title, description, category and tags, going by your note and photos"
             type="button"
           >
             {like.status === 'ready' ? 'Organize again' : 'Retry'}
           </button>
           <label className="likes-button">
-            {like.photoUrl ? 'Change photo' : 'Add photo'}
+            Add photos
             <input
               accept="image/*"
               disabled={busy}
+              multiple
               onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void run(() => uploadPhoto(file));
+                const files = [...(event.target.files ?? [])];
+                event.target.value = '';
+                if (files.length) void run(() => addPhotos(like.id, files));
               }}
               type="file"
             />

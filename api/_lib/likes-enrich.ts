@@ -26,7 +26,10 @@ import type { Like } from '../../shared/likes.js';
 
 const MODEL = 'claude-haiku-4-5';
 
-const IDENTIFY_PROMPT = `Someone saved this to their collection of things they like: links, notes and photos they keep so they can find them again and remember what each one was. Search the web for it and say exactly what it is: brand and model for a product, the name of a place or work. The pages you find also give it its picture in the collection, so search even when you already know what it is. Their text, note and photo show what caught their eye: when they single out one version, like a color, a material, or one of several models on a page, say which.`;
+/** How many of a like's photos Haiku looks at; the first is the cover */
+const MAX_PHOTOS = 4;
+
+const IDENTIFY_PROMPT = `Someone saved this to their collection of things they like: links, notes and photos they keep so they can find them again and remember what each one was. Search the web for it and say exactly what it is: brand and model for a product, the name of a place or work. The pages you find also give it its picture in the collection, so search even when you already know what it is. Their text, note and photos show what caught their eye: when they single out one version, like a color, a material, or one of several models on a page, say which.`;
 
 const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. From what they saved and what it turned out to be, fill in the details: the title and description let them recognize it at a glance, and the category and tags group it with similar things when they browse. When they singled out one version of something, the details are about that version. Reuse one of the collection's categories when one fits.`;
 
@@ -263,24 +266,20 @@ const withoutImages = <Request extends { messages: Anthropic.MessageParam[] }>(
   ),
 });
 
-/** The save as Haiku sees it: the photo, then the rest as JSON */
+/** The save as Haiku sees it: the photos, then the rest as JSON */
 function saveContent(
   save: Record<string, unknown>,
-  photo?: Buffer,
+  photos: Buffer[],
 ): Anthropic.ContentBlockParam[] {
   return [
-    ...(photo
-      ? [
-          {
-            type: 'image' as const,
-            source: {
-              type: 'base64' as const,
-              media_type: 'image/jpeg' as const,
-              data: photo.toString('base64'),
-            },
-          },
-        ]
-      : []),
+    ...photos.map((photo) => ({
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: 'image/jpeg' as const,
+        data: photo.toString('base64'),
+      },
+    })),
     { type: 'text', text: JSON.stringify(save, null, 2) },
   ];
 }
@@ -485,7 +484,7 @@ async function pickImage(
 async function enrichLike(like: Like): Promise<void> {
   try {
     const page = like.url ? await fetchPage(like.url) : undefined;
-    const photo = like.photoUrl ? await photoBytes(like.id) : undefined;
+    const photos = await photoBytes(like, MAX_PHOTOS);
     // Haiku runs even when every field is filled in (Claude often knows what
     // it is): its search finds the sources, and the pages that give the like
     // its picture. finishLike keeps the fields that were set
@@ -501,7 +500,7 @@ async function enrichLike(like: Like): Promise<void> {
         text: page.text,
       },
     };
-    const { answer, results } = await identify(like, saveContent(save, photo));
+    const { answer, results } = await identify(like, saveContent(save, photos));
     const found = await organize(
       like,
       saveContent(
@@ -512,7 +511,7 @@ async function enrichLike(like: Like): Promise<void> {
             ? [...results].map(([url, title]) => ({ url, title }))
             : undefined,
         },
-        photo,
+        photos,
       ),
     );
     const details = {

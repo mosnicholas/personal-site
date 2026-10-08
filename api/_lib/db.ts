@@ -126,8 +126,8 @@ async function createSchema(sql: Sql): Promise<Sql> {
 
   // Things I like (/likes): links, notes and photos I save, with a title,
   // description, category and tags that Haiku fills in unless I set them
-  // (likes.ts). `photo` is a private Vercel Blob URL; `claimed_at` keeps two
-  // workers off the same like
+  // (likes.ts). `photo` was a private Vercel Blob URL, now `photos`
+  // (migration 7); `claimed_at` keeps two workers off the same like
   await sql`
     CREATE TABLE IF NOT EXISTS likes (
       id text PRIMARY KEY,
@@ -318,6 +318,17 @@ const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
       WHERE list IS NULL AND split_part(text, chr(10), 1) IN (
         'Original section: Favorite restaurants',
         'Original section: Best live shows')`;
+  },
+
+  // 7. More than one photo per like: `photos` (private Vercel Blob URLs, the
+  // first one the cover) takes over from `photo`
+  async (sql) => {
+    await sql`
+      ALTER TABLE likes ADD COLUMN IF NOT EXISTS photos text[] NOT NULL DEFAULT '{}'`;
+    await sql`
+      UPDATE likes SET photos = ARRAY[photo]
+      WHERE photo IS NOT NULL AND photos = '{}'`;
+    await sql`ALTER TABLE likes DROP COLUMN photo`;
   },
 ];
 

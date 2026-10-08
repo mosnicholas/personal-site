@@ -18,9 +18,9 @@ import {
 import {
   getLike,
   LikeInputError,
+  addPhoto,
   photoBytes,
   redoLike,
-  replacePhoto,
   saveLike,
   searchLikes,
   updateLike,
@@ -34,6 +34,9 @@ const MAX_TEXT_CHARS = 100_000;
 
 // Results per page of a search; more come with offset
 const MAX_RESULTS = 100;
+
+// A like's photos that get returns; each is up to 2048px, about 1,600 tokens
+const MAX_PHOTOS = 10;
 
 type Content =
   | { type: 'text'; text: string }
@@ -78,7 +81,7 @@ const likeResult = (like: Like, site: string) => ({
   description: like.description,
   category: like.category,
   tags: like.tags,
-  hasPhoto: Boolean(like.photoUrl),
+  photos: like.photoUrls.length,
   status: like.status,
   saved: like.createdAt.slice(0, 10),
   link: `${site}/likes?item=${like.id}`,
@@ -161,7 +164,7 @@ const TOOLS: Tool[] = [
         note: str(args.note),
         list: str(args.list),
         review: str(args.review),
-        photo: photoUrl(args.photo),
+        photos: [photoUrl(args.photo)].filter((url) => url !== undefined),
         title: str(args.title),
         description: str(args.description),
         category: str(args.category),
@@ -175,7 +178,7 @@ const TOOLS: Tool[] = [
   {
     name: 'update',
     description:
-      'Change a like: its note, list, review, title, description, category, tags or photo. Set reorganize to have its details written again from the note and photo, for instance after he says which version of something he means.',
+      'Change a like: its note, list, review, title, description, category or tags, or add a photo to it. Set reorganize to have its details written again from the note and photos, for instance after he says which version of something he means.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -203,7 +206,7 @@ const TOOLS: Tool[] = [
       const id = str(args.id) ?? '';
       if (!(await getLike(id))) throw new ToolError(`No like has the id ${id}`);
       const photo = photoUrl(args.photo);
-      if (photo) await replacePhoto(id, photo);
+      if (photo) await addPhoto(id, photo);
       // Cleared first, so what this call sets survives the rewrite
       if (args.reorganize === true) await redoLike(id);
       const like = await updateLike(id, {
@@ -282,7 +285,7 @@ const TOOLS: Tool[] = [
   {
     name: 'get',
     description:
-      'Get one like or saved article by its id, in full: a like with its photo, or an article with its summary and text.',
+      'Get one like or saved article by its id, in full: a like with its photos, or an article with its summary and text.',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string' } },
@@ -294,18 +297,14 @@ const TOOLS: Tool[] = [
       const id = str(args.id) ?? '';
       const like = await getLike(id);
       if (like) {
-        const photo = like.photoUrl ? await photoBytes(like.id) : undefined;
+        const photos = await photoBytes(like, MAX_PHOTOS);
         return [
           ...asJson({ source: 'likes', ...likeResult(like, site) }),
-          ...(photo
-            ? [
-                {
-                  type: 'image' as const,
-                  data: photo.toString('base64'),
-                  mimeType: 'image/jpeg',
-                },
-              ]
-            : []),
+          ...photos.map((photo) => ({
+            type: 'image' as const,
+            data: photo.toString('base64'),
+            mimeType: 'image/jpeg',
+          })),
         ];
       }
       const document = await getSavedDocument(id);

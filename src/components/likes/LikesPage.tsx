@@ -7,6 +7,7 @@ import {
   errorMessage,
   json,
   likeImage,
+  addPhotos,
   resizePhoto,
   savedDate,
 } from './api';
@@ -75,7 +76,7 @@ const Capture = ({ onSaved }: { onSaved: () => void }) => {
     () => new URLSearchParams(window.location.search).get('text') ?? '',
   );
   const [note, setNote] = useState('');
-  const [photo, setPhoto] = useState<File>();
+  const [photos, setPhotos] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -85,13 +86,18 @@ const Capture = ({ onSaved }: { onSaved: () => void }) => {
     setSaving(true);
     setError('');
     try {
-      if (photo) {
+      if (photos.length) {
+        const [first, ...rest] = photos;
         const body = new FormData();
         body.set('url', url);
         body.set('text', text);
         body.set('note', note);
-        body.set('photo', await resizePhoto(photo), 'photo.jpg');
-        await api('', { method: 'POST', body });
+        body.set('photo', await resizePhoto(first), 'photo.jpg');
+        const { like } = await api<{ like: Like }>('', {
+          method: 'POST',
+          body,
+        });
+        await addPhotos(like.id, rest);
       } else {
         await api('', json('POST', { url, text, note }));
       }
@@ -99,7 +105,7 @@ const Capture = ({ onSaved }: { onSaved: () => void }) => {
       setUrl('');
       setText('');
       setNote('');
-      setPhoto(undefined);
+      setPhotos([]);
       onSaved();
     } catch (reason) {
       setError(errorMessage(reason));
@@ -128,10 +134,13 @@ const Capture = ({ onSaved }: { onSaved: () => void }) => {
         value={note}
       />
       <label className="likes-file">
-        {photo ? photo.name : 'Photo'}
+        {photos.length > 1
+          ? `${photos.length} photos`
+          : (photos[0]?.name ?? 'Photos')}
         <input
           accept="image/*"
-          onChange={(event) => setPhoto(event.target.files?.[0])}
+          multiple
+          onChange={(event) => setPhotos([...(event.target.files ?? [])])}
           type="file"
         />
       </label>
