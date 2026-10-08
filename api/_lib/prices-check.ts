@@ -17,6 +17,7 @@ import {
   loadPrices,
   type Price,
   priceAt,
+  type TokenPrice,
   tokenUsage,
   type Usage,
 } from './pricing.js';
@@ -26,7 +27,7 @@ export const PRICING_URL =
   'https://platform.claude.com/docs/en/about-claude/pricing.md';
 
 // The price table's columns, in order, after the model name
-const COLUMNS: [keyof Price, string][] = [
+const COLUMNS: [keyof TokenPrice, string][] = [
   ['input', 'base input tokens'],
   ['cacheWrite5m', '5m cache writes'],
   ['cacheWrite1h', '1h cache writes'],
@@ -55,7 +56,7 @@ const plain = (cell: string) =>
     .trim();
 
 /** Why a price doesn't look like one of Anthropic's, if it doesn't */
-function implausible(price: Price): string | undefined {
+function implausible(price: TokenPrice): string | undefined {
   if (Object.values(price).some((value) => !(value > 0))) {
     return 'a price is zero';
   }
@@ -70,9 +71,15 @@ function implausible(price: Price): string | undefined {
   return undefined;
 }
 
+// "(for prompts up to 100,000 tokens)": a model priced by prompt length has
+// a row for each length
+const PROMPT_LENGTH = /\(for prompts (up to|over) ([\d,]+) tokens\)/i;
+
 /**
  * The model price table from the pricing page's Markdown, keyed by API
- * model ID ("Claude Opus 5.5" -> claude-opus-5-5)
+ * model ID ("Claude Opus 5.5" -> claude-opus-5-5). A model priced by prompt
+ * length gets the short-prompt prices, with the long-prompt ones as
+ * `longPrompt`
  */
 export function parsePricingPage(markdown: string): ListedPrices {
   const lines = markdown.split('\n');
@@ -92,6 +99,7 @@ export function parsePricingPage(markdown: string): ListedPrices {
   }
 
   const prices = new Map<string, Price>();
+  const longPrompts = new Map<string, Price['longPrompt']>();
   const rejected: ListedPrices['rejected'] = [];
   // Skip the header and its |---| line
   for (
@@ -100,6 +108,7 @@ export function parsePricingPage(markdown: string): ListedPrices {
     i += 1
   ) {
     const row = cells(lines[i]);
+    const length = plain(row[0]).match(PROMPT_LENGTH);
     // "Claude Mythos 5.1 (limited availability)" -> "Claude Mythos 5.1"
     const name = plain(row[0]).replace(/\s*\(.*\)\s*$/, '');
     const reject = (reason: string) => rejected.push({ row: name, reason });
@@ -127,7 +136,18 @@ export function parsePricingPage(markdown: string): ListedPrices {
       reject(problem);
       continue;
     }
-    prices.set(name.toLowerCase().replace(/[ .]/g, '-'), price);
+    const model = name.toLowerCase().replace(/[ .]/g, '-');
+    if (length?.[1].toLowerCase() === 'over') {
+      longPrompts.set(model, {
+        ...price,
+        above: Number(length[2].replace(/,/g, '')),
+      });
+    } else prices.set(model, price);
+  }
+  for (const [model, longPrompt] of longPrompts) {
+    const price = prices.get(model);
+    if (price) price.longPrompt = longPrompt;
+    else rejected.push({ row: model, reason: 'long-prompt prices only' });
   }
 
   if (prices.size === 0) throw new Error('No readable rows in the price table');
@@ -179,10 +199,16 @@ export interface PriceCheckReport {
   costsFilled: number;
 }
 
+const sameRates = (a: TokenPrice, b: TokenPrice) =>
+  COLUMNS.every(([key]) => Math.abs(a[key] - b[key]) < 1e-9);
+
 const samePrice = (a: Price, b: Price) =>
-  [...COLUMNS.map(([key]) => key), 'webSearch' as const].every(
-    (key) => Math.abs(a[key] - b[key]) < 1e-9,
-  );
+  sameRates(a, b) &&
+  Math.abs(a.webSearch - b.webSearch) < 1e-9 &&
+  (a.longPrompt && b.longPrompt
+    ? a.longPrompt.above === b.longPrompt.above &&
+      sameRates(a.longPrompt, b.longPrompt)
+    : !a.longPrompt && !b.longPrompt);
 
 export async function checkPrices(
   sql: Sql,
@@ -221,7 +247,7 @@ export async function checkPrices(
     if (!before) added.push({ model, price });
     else if (!samePrice(before, price)) {
       const { input, output, cacheWrite5m, cacheWrite1h, cacheRead } = before;
-      const { webSearch } = before;
+      const { webSearch, longPrompt } = before;
       changed.push({
         model,
         before: {
@@ -231,6 +257,7 @@ export async function checkPrices(
           cacheWrite1h,
           cacheRead,
           webSearch,
+          longPrompt,
         },
         after: price,
       });
@@ -249,16 +276,18 @@ export async function checkPrices(
     cache_write_1h: price.cacheWrite1h,
     cache_read: price.cacheRead,
     web_search: price.webSearch,
+    long_prompt: price.longPrompt ?? null,
     source: PRICING_URL,
   }));
   if (rows.length > 0) {
     await sql`
       INSERT INTO model_prices (model, effective_from, input, output,
-        cache_write_5m, cache_write_1h, cache_read, web_search, source)
+        cache_write_5m, cache_write_1h, cache_read, web_search, long_prompt,
+        source)
       SELECT * FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb)
         AS r(model text, effective_from date, input numeric, output numeric,
           cache_write_5m numeric, cache_write_1h numeric, cache_read numeric,
-          web_search numeric, source text)
+          web_search numeric, long_prompt jsonb, source text)
       ON CONFLICT (model, effective_from) DO UPDATE SET
         input = excluded.input,
         output = excluded.output,
@@ -266,6 +295,7 @@ export async function checkPrices(
         cache_write_1h = excluded.cache_write_1h,
         cache_read = excluded.cache_read,
         web_search = excluded.web_search,
+        long_prompt = excluded.long_prompt,
         source = excluded.source,
         recorded_at = now()`;
     clearPriceCache();

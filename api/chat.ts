@@ -4,7 +4,7 @@ import { getAnthropic } from './_lib/anthropic.js';
 import { clientIp, createRateLimiter } from './_lib/rate-limit.js';
 import { tracedCall } from './_lib/traces.js';
 
-const MODEL = 'claude-haiku-4-5';
+const MODEL = 'claude-haiku-5-5';
 const MAX_MESSAGE_LENGTH = 500;
 // Replies are capped by max_tokens (~4k chars); this bounds what clients echo back
 const MAX_REPLY_LENGTH = 8000;
@@ -223,6 +223,10 @@ export default {
     const params = {
       model: MODEL,
       max_tokens: 1024,
+      // Short replies need no thinking, which would also count against
+      // max_tokens
+      thinking: { type: 'disabled' as const },
+      output_config: { effort: 'low' as const },
       // Caches the growing conversation once it's long enough to qualify
       cache_control: { type: 'ephemeral' as const },
       system: SYSTEM_PROMPT,

@@ -330,6 +330,25 @@ const MIGRATIONS: ((sql: Sql) => Promise<void>)[] = [
       WHERE photo IS NOT NULL AND photos = '{}'`;
     await sql`ALTER TABLE likes DROP COLUMN photo`;
   },
+
+  // 8. Haiku 5.5 is priced by prompt length, higher over 100,000 tokens: those
+  // prices go in `long_prompt`. Its row is written here, replacing any the
+  // price check wrote before it could read two rows for one model
+  async (sql) => {
+    await sql`
+      ALTER TABLE model_prices ADD COLUMN IF NOT EXISTS long_prompt jsonb`;
+    await sql`DELETE FROM model_prices WHERE model = 'claude-haiku-5-5'`;
+    await sql`
+      INSERT INTO model_prices (model, effective_from, input, output,
+        cache_write_5m, cache_write_1h, cache_read, web_search, long_prompt,
+        source)
+      VALUES ('claude-haiku-5-5', '2026-10-08', 0.1, 0.5, 0.125, 0.2, 0.01, 10,
+        ${JSON.stringify({ above: 100_000, input: 0.5, output: 2.5, cacheWrite5m: 0.625, cacheWrite1h: 1, cacheRead: 0.05 })}::jsonb,
+        'https://platform.claude.com/docs/en/about-claude/pricing.md')`;
+    await sql`
+      UPDATE llm_traces SET cost_usd = NULL
+      WHERE response_model LIKE 'claude-haiku-5-5%'`;
+  },
 ];
 
 async function migrate(sql: Sql): Promise<void> {

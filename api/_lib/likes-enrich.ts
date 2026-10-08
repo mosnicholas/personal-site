@@ -24,7 +24,7 @@ import { htmlToText } from './summarize.js';
 import { tracedCall } from './traces.js';
 import type { Like } from '../../shared/likes.js';
 
-const MODEL = 'claude-haiku-4-5';
+const MODEL = 'claude-haiku-5-5';
 
 /** How many of a like's photos Haiku looks at; the first is the cover */
 const MAX_PHOTOS = 4;
@@ -582,6 +582,7 @@ async function splitNotes(
     system: SPLIT_PROMPT,
     messages: [{ role: 'user' as const, content: notes }],
     output_config: {
+      effort: 'low' as const,
       format: {
         type: 'json_schema' as const,
         schema: {

@@ -25,7 +25,7 @@ import { loggedCron } from './_lib/traces.js';
  * - email: Send the email when something changed (default: true)
  */
 
-const PRICE_FIELDS: [keyof Price, string][] = [
+const PRICE_FIELDS: [Exclude<keyof Price, 'longPrompt'>, string][] = [
   ['input', 'Input'],
   ['cacheWrite5m', '5m cache write'],
   ['cacheWrite1h', '1h cache write'],
@@ -39,24 +39,48 @@ const priceCells = (price: Price) =>
     ([key]) => `<td style="padding: 2px 10px">$${price[key]}</td>`,
   ).join('');
 
+/** A price, and its long-prompt prices as their own row, with a label */
+const tiers = (model: string, price: Price): [string, Price][] => [
+  [model, price],
+  ...(price.longPrompt
+    ? [
+        [
+          `${model} (prompts over ${price.longPrompt.above.toLocaleString('en-US')} tokens)`,
+          { ...price, ...price.longPrompt },
+        ] as [string, Price],
+      ]
+    : []),
+];
+
 function reportEmail(report: PriceCheckReport): {
   subject: string;
   html: string;
 } {
-  const changedRows = report.changed.flatMap(({ model, before, after }) =>
-    PRICE_FIELDS.filter(
-      ([key]) => Math.abs(before[key] - after[key]) >= 1e-9,
-    ).map(([key, label]) => {
-      const percent =
-        before[key] === 0
-          ? 'n/a'
-          : `${after[key] > before[key] ? '+' : ''}${(((after[key] - before[key]) / before[key]) * 100).toFixed(1)}%`;
-      return `<tr><td style="padding: 4px 10px">${escapeHtml(model)}<br>${label}</td><td style="padding: 4px 10px"><b>$${before[key]} &rarr; $${after[key]}</b></td><td style="padding: 4px 10px"><b>${percent}</b></td></tr>`;
-    }),
-  );
-  const addedRows = report.added.map(
-    ({ model, price }) =>
-      `<tr><td style="padding: 2px 10px">${escapeHtml(model)}</td>${priceCells(price)}</tr>`,
+  const changedRows = report.changed.flatMap(({ model, before, after }) => {
+    const beforeTiers = new Map(tiers(model, before));
+    return tiers(model, after).flatMap(([model, after]) => {
+      const before = beforeTiers.get(model);
+      if (!before) {
+        return [
+          `<tr><td style="padding: 4px 10px">${escapeHtml(model)}</td><td style="padding: 4px 10px" colspan="2"><b>New prices</b></td></tr>`,
+        ];
+      }
+      return PRICE_FIELDS.filter(
+        ([key]) => Math.abs(before[key] - after[key]) >= 1e-9,
+      ).map(([key, label]) => {
+        const percent =
+          before[key] === 0
+            ? 'n/a'
+            : `${after[key] > before[key] ? '+' : ''}${(((after[key] - before[key]) / before[key]) * 100).toFixed(1)}%`;
+        return `<tr><td style="padding: 4px 10px">${escapeHtml(model)}<br>${label}</td><td style="padding: 4px 10px"><b>$${before[key]} &rarr; $${after[key]}</b></td><td style="padding: 4px 10px"><b>${percent}</b></td></tr>`;
+      });
+    });
+  });
+  const addedRows = report.added.flatMap(({ model, price }) =>
+    tiers(model, price).map(
+      ([label, price]) =>
+        `<tr><td style="padding: 2px 10px">${escapeHtml(label)}</td>${priceCells(price)}</tr>`,
+    ),
   );
   const notes = [
     report.rejected.length > 0 &&

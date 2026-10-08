@@ -83,7 +83,7 @@ Readwise stays the source of truth, and Postgres keeps a mirror of the library (
 
 Readwise holds the taxonomy: it's the set of tags in use.
 
-- **On save** (`/api/readwise-webhook`): Claude Haiku 4.5 gives the document up to 5 tags for its main topics, from our summary. It sees every existing tag with how many documents use it and its glossary definition, is told to reuse them, and creates a new tag only when none fits, since the taxonomy is still growing. Documents it can't place get `other`.
+- **On save** (`/api/readwise-webhook`): Claude Haiku 5.5 gives the document up to 5 tags for its main topics, from our summary. It sees every existing tag with how many documents use it and its glossary definition, is told to reuse them, and creates a new tag only when none fits, since the taxonomy is still growing. Documents it can't place get `other`.
 - **Weekly** (`/api/rebalance-tags`, Sundays 7am UTC, before the 9am summary): tags anything the webhook missed, then Claude Opus 5.5 merges duplicate and overlapping tags, folds one-off tags into the broader tag that covers them, and sorts out `other`. Everything is applied straight away; the plan and every before → after change (with document titles) are saved in the trace log.
 - **Glossary** (`/api/tag-glossary`, Sundays 8am UTC, after the cleanup): Claude Opus 5.5 writes a one-line definition for every tag used by two or more documents (what it covers, and what it doesn't when a neighbor is close) and sorts them into 6-12 named clusters, keeping last week's where they still fit. The tagger reads the definitions. Claude Sonnet 5.5 then writes a brief for each tag with 3+ saved documents whose count changed. Reruns within 6 days only continue the briefs (`?redefine=true` redoes the definitions).
 - **Merges stick:** each run reads earlier runs' merges from the trace log. They're shown to Opus, a retired tag that comes back is folded into its replacement without asking, and a plan can't merge a tag back into one it replaced (the first backfill flipped `ux-design` and `user-experience` between two runs).
@@ -106,7 +106,7 @@ ORDER BY r.created_at, title;
 
 ## /likes (private)
 
-`nimo.fyi/likes` is a private collection of things I like: links, notes and photos, each given a title, description, category and tags by Claude Haiku 4.5 (which searches the web to identify products and places), plus a monthly email of a few old ones. Setup:
+`nimo.fyi/likes` is a private collection of things I like: links, notes and photos, each given a title, description, category and tags by Claude Haiku 5.5 (which searches the web to identify products and places), plus a monthly email of a few old ones. Setup:
 
 1. Set `PERSONAL_SITE_OWNER_KEY` (above). It's the password on `/likes`, and signs the tokens Claude uses; changing it signs everything out
 2. Vercel → Storage → Create → Blob, with **private** access, connected to the project. On Vercel it authenticates with the project's OIDC token; `BLOB_READ_WRITE_TOKEN` is only needed to run it locally
@@ -192,8 +192,8 @@ Visit `http://localhost:3000?mode=terminal`.
 ```
 personal-site/
 ├── api/
-│   ├── chat.ts              # Terminal chat (Claude Haiku 4.5, rate limited)
-│   ├── readwise-webhook.ts  # Stores, summarizes (Sonnet 5.5) and tags (Haiku 4.5) new documents
+│   ├── chat.ts              # Terminal chat (Claude Haiku 5.5, rate limited)
+│   ├── readwise-webhook.ts  # Stores, summarizes (Sonnet 5.5) and tags (Haiku 5.5) new documents
 │   ├── sync-documents.ts    # Daily library mirror, full texts, summary backfill (Sonnet 5.5)
 │   ├── rebalance-tags.ts    # Weekly taxonomy rebalance cron (Opus 5.5)
 │   ├── tag-glossary.ts      # Weekly tag definitions, clusters (Opus 5.5) and briefs (Sonnet 5.5)
@@ -201,7 +201,7 @@ personal-site/
 │   ├── reading-synthesis.ts # Monthly 90-day synthesis cron (Opus 5.5)
 │   ├── update-prices.ts     # Daily model price check (no LLM)
 │   ├── reading-graph.ts     # Public data for /reading
-│   ├── likes.ts             # /likes API and likes crons (Haiku 4.5)
+│   ├── likes.ts             # /likes API and likes crons (Haiku 5.5)
 │   ├── mcp.ts               # MCP server for Claude/ChatGPT (likes + reading) and its OAuth
 │   └── _lib/                # Shared helpers (underscore = not deployed as functions)
 ├── src/                     # React app
@@ -224,7 +224,7 @@ All functions use the Web standard `export default { fetch(request) }` signature
 ## Further Customization
 
 ### Change the AI Model
-Edit `MODEL` in `api/chat.ts` (currently `claude-haiku-4-5`). Model list: https://platform.claude.com/docs/en/about-claude/models/overview
+Edit `MODEL` in `api/chat.ts` (currently `claude-haiku-5-5`). Model list: https://platform.claude.com/docs/en/about-claude/models/overview
 
 ### Customize System Prompt
 Edit the `SYSTEM_PROMPT` constant in `api/chat.ts`.

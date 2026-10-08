@@ -10,8 +10,8 @@
 
 import type { Sql } from './db.js';
 
-/** USD per million tokens, and per 1,000 web searches */
-export interface Price {
+/** USD per million tokens */
+export interface TokenPrice {
   input: number;
   output: number;
   /** Cache writes with the default 5-minute lifetime */
@@ -19,8 +19,17 @@ export interface Price {
   /** Cache writes with the 1-hour lifetime */
   cacheWrite1h: number;
   cacheRead: number;
+}
+
+/** USD per million tokens, and per 1,000 web searches */
+export interface Price extends TokenPrice {
   /** Web searches, per 1,000 */
   webSearch: number;
+  /**
+   * Higher token prices for prompts of more than `above` tokens (input,
+   * cache writes and cache reads together), e.g. Haiku 5.5 over 100,000
+   */
+  longPrompt?: TokenPrice & { above: number };
 }
 
 export interface PriceRow extends Price {
@@ -103,7 +112,7 @@ export async function loadPrices(sql: Sql): Promise<PriceRow[]> {
   if (!cache || Date.now() - cache.at > CACHE_MS) {
     const rows = await sql`
       SELECT model, effective_from::text AS effective_from, input, output,
-        cache_write_5m, cache_write_1h, cache_read, web_search
+        cache_write_5m, cache_write_1h, cache_read, web_search, long_prompt
       FROM model_prices`;
     cache = {
       rows: rows.map((row) => ({
@@ -115,6 +124,8 @@ export async function loadPrices(sql: Sql): Promise<PriceRow[]> {
         cacheWrite1h: Number(row.cache_write_1h),
         cacheRead: Number(row.cache_read),
         webSearch: Number(row.web_search),
+        longPrompt:
+          (row.long_prompt as Price['longPrompt'] | null) ?? undefined,
       })),
       at: Date.now(),
     };
@@ -153,7 +164,8 @@ export interface TokenUsage {
  * Token counts and cost for a response, priced with `price` (from priceAt,
  * for the model that answered, which can differ from the one asked for when
  * a fallback ran). Input, cache writes, cache reads, output, and web
- * searches each have their own rate. Standard rates only: this site
+ * searches each have their own rate, and a long prompt can have higher
+ * token rates. Standard rates only: this site
  * doesn't use batch, fast mode, or US-only inference, which change them.
  */
 export function tokenUsage(usage: Usage, price: Price | undefined): TokenUsage {
@@ -164,17 +176,24 @@ export function tokenUsage(usage: Usage, price: Price | undefined): TokenUsage {
   // Without a breakdown, every cache write is the default 5-minute kind
   const writes1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
   const writes5m = cacheCreationInputTokens - writes1h;
+  const promptTokens =
+    inputTokens + cacheCreationInputTokens + cacheReadInputTokens;
+  const rates =
+    price?.longPrompt && promptTokens > price.longPrompt.above
+      ? price.longPrompt
+      : price;
 
-  const costUsd = price
-    ? (inputTokens * price.input +
-        writes5m * price.cacheWrite5m +
-        writes1h * price.cacheWrite1h +
-        cacheReadInputTokens * price.cacheRead +
-        outputTokens * price.output) /
-        1_000_000 +
-      ((usage.server_tool_use?.web_search_requests ?? 0) * price.webSearch) /
-        1_000
-    : undefined;
+  const costUsd =
+    price && rates
+      ? (inputTokens * rates.input +
+          writes5m * rates.cacheWrite5m +
+          writes1h * rates.cacheWrite1h +
+          cacheReadInputTokens * rates.cacheRead +
+          outputTokens * rates.output) /
+          1_000_000 +
+        ((usage.server_tool_use?.web_search_requests ?? 0) * price.webSearch) /
+          1_000
+      : undefined;
 
   return {
     inputTokens,

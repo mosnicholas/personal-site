@@ -11,7 +11,7 @@ import { getAnthropic } from './anthropic.js';
 import { tracedCall } from './traces.js';
 import { normalizeTag, OTHER_TAG, type TaxonomyTag } from './taxonomy.js';
 
-const TAGGING_MODEL = 'claude-haiku-4-5';
+const TAGGING_MODEL = 'claude-haiku-5-5';
 const MAX_TAGS = 5;
 
 const SYSTEM_PROMPT = `You tag documents in a personal reading library so related reading can be found together. Give each document 1-${MAX_TAGS} tags naming its main topics, most relevant first, not things it only mentions in passing.
@@ -48,7 +48,8 @@ export async function classifyDocument(
 ): Promise<string[]> {
   const request = {
     model: TAGGING_MODEL,
-    max_tokens: 1024,
+    // Room for thinking before the tags
+    max_tokens: 4096,
     system: [
       { type: 'text' as const, text: SYSTEM_PROMPT },
       // The same for every document, so cache it across calls (a backfill
@@ -66,6 +67,7 @@ export async function classifyDocument(
       },
     ],
     output_config: {
+      effort: 'low' as const,
       format: {
         type: 'json_schema' as const,
         schema: {
