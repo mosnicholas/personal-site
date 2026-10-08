@@ -304,13 +304,38 @@ export async function readPhoto(
     : undefined;
 }
 
-/** The categories in use, most used first, for enrichment to reuse */
-export async function likeCategories(): Promise<string[]> {
+export interface LikeCategory {
+  name: string;
+  likes: number;
+  /** The latest few titles */
+  examples: string[];
+  /** Its most used tags */
+  tags: string[];
+}
+
+/**
+ * The categories in use, most used first, with what's in them, so
+ * enrichment can see what each holds and reuse their tags
+ */
+export async function likeCategories(): Promise<LikeCategory[]> {
   const sql = await requireSql();
   const rows = await sql`
-    SELECT category FROM likes WHERE category IS NOT NULL
-    GROUP BY category ORDER BY count(*) DESC`;
-  return rows.map((row) => String(row.category));
+    SELECT category AS name, count(*)::int AS likes,
+      (array_agg(COALESCE(NULLIF(title, ''), left(text, 80))
+        ORDER BY created_at DESC))[1:3] AS examples,
+      ARRAY(
+        SELECT tag FROM likes inner_likes, unnest(inner_likes.tags) tag
+        WHERE inner_likes.category = likes.category
+        GROUP BY tag ORDER BY count(*) DESC, tag LIMIT 10
+      ) AS tags
+    FROM likes WHERE category IS NOT NULL
+    GROUP BY category ORDER BY count(*) DESC, category`;
+  return rows.map((row) => ({
+    name: String(row.name),
+    likes: Number(row.likes),
+    examples: row.examples as string[],
+    tags: row.tags as string[],
+  }));
 }
 
 /**

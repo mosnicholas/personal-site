@@ -17,6 +17,7 @@ export type TraceKind =
   | 'tagging'
   | 'document_summary'
   | 'rebalance'
+  | 'likes_realign'
   | 'tag_glossary'
   | 'tag_brief'
   | 'weekly_summary'

@@ -1,6 +1,6 @@
 /**
  * Fills in each like's title, description, category and tags with Claude
- * Haiku 4.5, which can search the web to pin down what a photo or note is.
+ * Haiku 5.5, which can search the web to pin down what a photo or note is.
  * It runs right after a save, once the response is sent (waitUntil), and
  * daily from the cron for anything left over. Also splits pasted notes into
  * separate likes.
@@ -31,7 +31,7 @@ const MAX_PHOTOS = 4;
 
 const IDENTIFY_PROMPT = `Someone saved this to their collection of things they like: links, notes and photos they keep so they can find them again and remember what each one was. Search the web for it and say exactly what it is: brand and model for a product, the name of a place or work. The pages you find also give it its picture in the collection, so search even when you already know what it is. Their text, note and photos show what caught their eye: when they single out one version, like a color, a material, or one of several models on a page, say which.`;
 
-const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. From what they saved and what it turned out to be, fill in the details: the title and description let them recognize it at a glance, and the category and tags group it with similar things when they browse. When they singled out one version of something, the details are about that version. Reuse one of the collection's categories when one fits.`;
+const SYSTEM_PROMPT = `You organize a personal collection of things someone likes: links, notes and photos they save so they can find them again and remember what each one was. From what they saved and what it turned out to be, fill in the details: the title and description let them recognize it at a glance, and the category and tags group it with similar things when they browse. When they singled out one version of something, the details are about that version. Reuse a category and its tags when they fit, and start a new one when none does.`;
 
 /** What the category and tags are for; Claude saving over MCP is told the same */
 export const CATEGORY_DESCRIPTION =
@@ -341,11 +341,16 @@ async function identify(like: Like, content: Anthropic.ContentBlockParam[]) {
  * the search results, picking the ones about it as sources
  */
 async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
-  const categories = await likeCategories();
+  const categories = (await likeCategories())
+    .map(
+      ({ name, likes, examples, tags }) =>
+        `${name} (${likes}): ${examples.join('; ')}${tags.length ? `. Tags: ${tags.join(', ')}` : ''}`,
+    )
+    .join('\n');
   const request = {
     model: MODEL,
     max_tokens: 4096,
-    system: `${SYSTEM_PROMPT}\n\nCategories so far: ${categories.join(', ') || '(none yet)'}`,
+    system: `${SYSTEM_PROMPT}\n\nCategories so far, with how many likes, the latest few, and their most used tags:\n${categories || '(none yet)'}`,
     tools: [SAVE_DETAILS],
     tool_choice: { type: 'tool' as const, name: SAVE_DETAILS.name },
     messages: [{ role: 'user' as const, content }],

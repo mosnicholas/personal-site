@@ -2,6 +2,7 @@ import type { LikePatch } from '../shared/likes.js';
 import { rejectUnauthorizedCron } from './_lib/auth.js';
 import { isOwner, login, logout, ownerKeyIsSet } from './_lib/owner-auth.js';
 import { sendLikesDigest } from './_lib/likes-digest.js';
+import { realignLikes } from './_lib/likes-realign.js';
 import {
   importNotes,
   processLikes,
@@ -35,8 +36,11 @@ import { loggedCron } from './_lib/traces.js';
  * - POST `?op=photo&id=` (a form with `photo`): add a photo after its others;
  *   DELETE `?op=photo&id=&n=` removes photo `n`
  * - POST `?op=login` `{ key }`, POST `?op=logout`
- * - Crons: `?op=process` (daily) enriches likes left waiting; `?op=digest`
- *   (monthly) emails a few old ones
+ * - Crons: `?op=process` (daily) enriches likes left waiting; `?op=realign`
+ *   (weekly) tidies categories and tags across all of them (_lib/likes-realign.ts);
+ *   `?op=digest` (monthly) emails a few old ones
+ * - POST `?op=realign`, signed in: the same realign now; `&dry_run=true`
+ *   returns the changes without applying them
  */
 
 async function handle(request: Request): Promise<Response> {
@@ -45,14 +49,20 @@ async function handle(request: Request): Promise<Response> {
   const id = params.get('id') ?? '';
   const { method } = request;
 
-  if (op === 'process' || op === 'digest') {
+  const cron =
+    op === 'process' ||
+    op === 'digest' ||
+    (op === 'realign' && method === 'GET');
+  if (cron) {
     return loggedCron(`likes-${op}`, {
       fetch: async () =>
         rejectUnauthorizedCron(request) ??
         Response.json(
           op === 'process'
             ? { processed: await processLikes() }
-            : await sendLikesDigest(),
+            : op === 'digest'
+              ? await sendLikesDigest()
+              : await realignLikes(),
         ),
     }).fetch(request);
   }
@@ -72,6 +82,10 @@ async function handle(request: Request): Promise<Response> {
   }
 
   switch (op) {
+    case 'realign':
+      return Response.json(
+        await realignLikes({ dryRun: params.get('dry_run') === 'true' }),
+      );
     case 'photo': {
       const n = Number(params.get('n') ?? 0);
       if (!Number.isInteger(n) || n < 0) {
