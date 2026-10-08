@@ -7,7 +7,7 @@ Personal site for Nicholas Moschopoulos (nimo), live at nimo.fyi. Six parts:
 2. **Terminal mode** (`?mode=terminal`, or press `~`/`t` on the landing page) - retro boot sequence, then a chat with a Claude-powered assistant about nimo.
 3. **Reading workflows** (migrated from n8n) - a Readwise webhook that summarizes and tags new documents, a daily sync that mirrors the library into Postgres, weekly crons that rebalance the taxonomy, write a tag glossary, and email a summary of the week's reading, and a monthly cron that emails a longer synthesis.
 4. **Reading map** (`/reading`, public) - a force-directed map of the tags, clustered, with a timeline and per-tag briefs, served from the mirror.
-5. **Likes** (`/likes`, private, just for nimo) - links, notes and photos he likes or wants to try, organized by Haiku, saved from the page, the iPhone share sheet or over MCP, with a monthly email resurfacing old ones.
+5. **Likes** (`/likes`, private, just for nimo) - links, notes and photos he likes or wants to try, organized by Haiku, saved from the page, the iPhone share sheet, a Mac menu bar app or over MCP, with a monthly email resurfacing old ones.
 6. **MCP server** (`/api/mcp`, private) - lets Claude and ChatGPT save likes and search and read both likes and the reading mirror.
 
 ## Tech Stack
@@ -81,6 +81,7 @@ personal-site/
 │       └── traces.ts          # Saves every LLM call to Postgres (`llm_traces`), and other events (`event_log`)
 ├── shared/likes.ts            # The Like type, shared by the API and /likes
 ├── docs/save-to-likes-shortcut.plist  # The iPhone share-sheet shortcut that saves a like (source; sign it to install)
+├── mac/                       # Likes.app, the Mac menu bar app that saves likes (SwiftUI, Swift package; mac/build.sh)
 ├── scripts/eval/             # Summary eval: pick documents, write candidates, judge (API or Claude Code agents), report; see its README
 ├── vite.config.ts
 ├── eslint.config.js
@@ -124,6 +125,7 @@ personal-site/
 - Saving a link that's already saved returns the existing like, with the list and review from that save if it gave them (sharing it again after going)
 - `list` is where I stand with a like, in free text: so far `want to try` or `been` (stored lowercase; null when it's just something I like). `review` is what I thought, shown on the page once the list is `been`. Haiku doesn't set either. Migration 6 set the list of the backfilled likes from the old list named in their text (places, restaurants and events to try; favorite restaurants and best shows); the rest are unset
 - The share-sheet shortcut (`docs/save-to-likes-shortcut.plist`) takes a link, text, Maps place or photos, asks want to try / been (and how it was) / just save it, then who recommended it or why, and posts it to `/api/likes` with the owner key as a bearer. Photos are used only when there's no link; each is resized (2048px long edge, JPEG) and posted on its own, the first as the like, the rest to `?op=photo`. Edit the plist with a script (Python plistlib) rather than by hand; Form file fields are `WFItemType` 5. The key is asked for on import, so the file has no secret. To install: `plutil -convert binary1 -o /tmp/s.shortcut docs/save-to-likes-shortcut.plist && shortcuts sign --mode anyone -i /tmp/s.shortcut -o "Save to Likes.shortcut"`, then open it on the Mac or iPhone
+- The Mac menu bar app (`mac/`, SwiftUI `MenuBarExtra`, macOS 14+, built with `mac/build.sh` from the command line tools alone, no Xcode; `--install` copies it to /Applications): drop or paste (⌘V) links, photos or text, or click to choose photos; then the same questions as the shortcut (Like / Want to try / Been, why, how was it) and Save. Same rules as the shortcut: each link is its own like, photos without a link are one like (resized to 2048px JPEG, one request each), text goes along. Below the drop zone, the 8 newest likes with their picture and status, refreshed every 4s while one is organizing; a row opens `/likes?item=`, its arrow the link. The owner key is in the login keychain. Signed ad hoc, so it only runs on the Mac that built it
 - Pasted notes are split by Haiku (structured output) in ~8k-character pieces; a piece that fails is saved whole
 - Auth (`owner-auth.ts`, shared with the MCP server): `PERSONAL_SITE_OWNER_KEY` signs in on the page (30-day HttpOnly cookie), works as a bearer token, and signs OAuth codes and tokens (HMAC, purpose-bound, no tables). Changing the key signs everything out
 - Monthly email (1st, noon UTC): 5 ready likes saved over 30 days ago, least recently emailed first, via `sendReadingEmail`
