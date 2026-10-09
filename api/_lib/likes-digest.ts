@@ -24,7 +24,7 @@ async function likesToResurface(): Promise<Like[]> {
 
 function likeHtml(like: Like): string {
   const link = `${SITE}/likes?item=${like.id}`;
-  const picture = likeImage(like, 480, true);
+  const picture = likeImage(like, 'medium');
   const image = picture
     ? `<img src="${escapeHtml(picture)}" alt="" style="max-width: 240px; max-height: 180px">`
     : '';

@@ -3,15 +3,11 @@ import { useState } from 'react';
 import { likeImage, likeTitle, type Like } from '../../../shared/likes';
 import type { Trail } from './trail';
 
-// Pixels wide: the faces show at about 24px, the tiles about 300px
-const FACE_WIDTH = 96;
-const TILE_WIDTH = 600;
-
 /** A few small pictures of what's behind a chip or a door */
 export const Faces = ({ likes, max }: { likes: Like[]; max: number }) => (
   <span className="likes-faces">
     {likes
-      .flatMap((like) => likeImage(like, FACE_WIDTH) ?? [])
+      .flatMap((like) => likeImage(like, 'small') ?? [])
       .slice(0, max)
       .map((src) => (
         <img
@@ -123,7 +119,7 @@ const Shelf = ({
             )
             .map(([name, inCategory]) => {
               const cover = inCategory.flatMap(
-                (like) => likeImage(like, TILE_WIDTH) ?? [],
+                (like) => likeImage(like, 'medium') ?? [],
               )[0];
               return (
                 <button

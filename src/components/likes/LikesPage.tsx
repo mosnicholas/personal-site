@@ -205,11 +205,8 @@ const Import = ({ onImported }: { onImported: () => void }) => {
   );
 };
 
-// Pixels wide: a little more than the card shows, for sharp screens
-const CARD_WIDTH = 600;
-
 const LikeCard = ({ like, onOpen }: { like: Like; onOpen: () => void }) => {
-  const image = likeImage(like, CARD_WIDTH);
+  const image = likeImage(like, 'medium');
   return (
     <button className="likes-card" onClick={onOpen} type="button">
       {image ? (

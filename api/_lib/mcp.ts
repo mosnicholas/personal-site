@@ -35,7 +35,7 @@ const MAX_TEXT_CHARS = 100_000;
 // Results per page of a search; more come with offset
 const MAX_RESULTS = 100;
 
-// A like's photos that get returns; each is resized to 1568px, about 1,600 tokens
+// A like's photos that get returns, each at its large size (about 1,600 tokens)
 const MAX_PHOTOS = 10;
 
 type Content =

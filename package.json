@@ -15,6 +15,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "db:migrate": "node --env-file=.env.local scripts/migrate.ts",
+    "pictures:sizes": "node --env-file=.env.local --import ./scripts/eval/register.mjs scripts/picture-sizes.ts",
     "eval:pick": "node --env-file-if-exists=.env.local --import ./scripts/eval/register.mjs scripts/eval/pick.ts",
     "eval:summarize": "node --env-file-if-exists=.env.local --import ./scripts/eval/register.mjs scripts/eval/summarize.ts",
     "eval:judge": "node --env-file-if-exists=.env.local --import ./scripts/eval/register.mjs scripts/eval/judge.ts",
@@ -31,7 +32,8 @@
     "d3-force": "^3.0.0",
     "postgres": "^3.4.9",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

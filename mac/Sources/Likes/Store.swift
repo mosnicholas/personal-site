@@ -122,7 +122,7 @@ final class Thumbnails {
   private var cache: [String: NSImage] = [:]
 
   func image(for like: Like, api: API) async -> NSImage? {
-    // Photos and stored pictures are public in Storage, resized on request
+    // Photos and stored pictures are public in Storage, with their sizes
     let stored = like.photoUrls.first ?? like.pictureUrl
     let path = stored.map(Thumbnails.small) ?? like.imageUrl
     guard let path else { return nil }
@@ -134,10 +134,12 @@ final class Thumbnails {
     return image
   }
 
-  /// The picture at 160px (sizedPicture in shared/likes.ts)
+  /// The picture at its small size, stored next to the original under its
+  /// name without the extension (sizedPicture in shared/likes.ts)
   static func small(_ url: String) -> String {
-    url.replacingOccurrences(
-      of: "/storage/v1/object/public/", with: "/storage/v1/render/image/public/")
-      + "?width=160&resize=contain"
+    guard url.contains("/storage/v1/object/public/"),
+      let dot = url.lastIndex(of: "."), dot > (url.lastIndex(of: "/") ?? url.startIndex)
+    else { return url }
+    return String(url[..<dot]) + "/small"
   }
 }

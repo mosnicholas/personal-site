@@ -383,18 +383,13 @@ export async function failLike(id: string, error: string) {
   await sql`UPDATE likes SET status = 'failed', error = ${error} WHERE id = ${id}`;
 }
 
-// Photos shown to a model are resized to fit the Anthropic API's limits
-const MODEL_PHOTO_WIDTH = 1568;
-
-/** A like's first `limit` photos, resized, for a model to look at */
+/** A like's first `limit` photos, at their large size, for a model to look at */
 export async function photoBytes(
   like: Like,
   limit: number,
 ): Promise<Picture[]> {
   const photos = await Promise.all(
-    like.photoUrls
-      .slice(0, limit)
-      .map((url) => fetchStoredPicture(url, MODEL_PHOTO_WIDTH)),
+    like.photoUrls.slice(0, limit).map((url) => fetchStoredPicture(url)),
   );
   return photos.filter((photo) => photo !== undefined);
 }

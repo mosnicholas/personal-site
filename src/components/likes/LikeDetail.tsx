@@ -123,7 +123,7 @@ const LikeDetail = ({
     </label>
   );
 
-  const image = likeImage(like, 1600);
+  const image = likeImage(like, 'large');
 
   return (
     <div className="likes-detail-backdrop" onMouseDown={onClose}>
@@ -147,7 +147,7 @@ const LikeDetail = ({
                 <img
                   alt=""
                   className="likes-detail-image"
-                  src={sizedPicture(photoUrl, 1600)}
+                  src={sizedPicture(photoUrl, 'large')}
                 />
                 <button
                   aria-label="Remove photo"

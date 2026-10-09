@@ -92,7 +92,7 @@ const Wander = ({
     );
   };
   const others = likes.filter((other) => other.id !== like.id);
-  const image = likeImage(like, 1600);
+  const image = likeImage(like, 'large');
 
   return (
     <div aria-label="Wander" className="likes-wander" role="dialog">
@@ -177,7 +177,7 @@ const Wander = ({
         <div className="likes-path">
           {path.map((visited, i) => {
             const stop = likes.find((other) => other.id === visited.id);
-            const src = stop && likeImage(stop, 96);
+            const src = stop && likeImage(stop, 'small');
             return (
               <span className="likes-path-stop" key={`${i}-${visited.id}`}>
                 {visited.via && (

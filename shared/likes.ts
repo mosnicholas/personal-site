@@ -52,24 +52,35 @@ export const likeTitle = (like: Like) =>
   like.text.slice(0, 80) ||
   'Photo';
 
-const ORIGINAL = '/storage/v1/object/public/';
-
 /**
- * A stored picture at `width` pixels, rendered by Supabase's image
- * transformations (WebP when the browser takes it); any other URL as it is.
- * `contain` keeps the proportions: width alone kept the original height.
- * `keepFormat` skips WebP, for email (Outlook on Windows doesn't show it)
+ * The sizes each stored picture is saved at besides its original, as the
+ * longest width it can be (narrower pictures keep theirs): small for the
+ * faces and the Wander path, medium for cards, tiles and email, large for
+ * Wander, the edit panel and the models. Phones have 2-3x screens, so a card
+ * on a phone needs about the pixels of one on a desktop: sizes go by where a
+ * picture is shown, not the device
  */
-export const sizedPicture = (url: string, width: number, keepFormat = false) =>
-  url.includes(ORIGINAL)
-    ? `${url.replace(ORIGINAL, '/storage/v1/render/image/public/')}?width=${width}&resize=contain${keepFormat ? '&format=origin' : ''}`
-    : url;
+export const PICTURE_SIZES = { small: 200, medium: 640, large: 1600 } as const;
+export type PictureSize = keyof typeof PICTURE_SIZES;
+
+const ORIGINAL = /\/storage\/v1\/object\/public\/(.+)\.\w+$/;
 
 /**
- * The like's picture at `width`: its first photo, else its stored picture,
+ * Where a stored picture is kept at `size`: next to the original, under its
+ * name without the extension (`{likeId}/{uuid}.jpg` is at
+ * `{likeId}/{uuid}/medium`). Any other URL as it is
+ */
+export const sizedPicture = (url: string, size: PictureSize) =>
+  url.replace(
+    ORIGINAL,
+    (_, path: string) => `/storage/v1/object/public/${path}/${size}`,
+  );
+
+/**
+ * The like's picture at `size`: its first photo, else its stored picture,
  * else the page's preview image where it came from (until it's stored)
  */
-export const likeImage = (like: Like, width: number, keepFormat = false) => {
+export const likeImage = (like: Like, size: PictureSize) => {
   const picture = like.photoUrls[0] ?? like.pictureUrl;
-  return picture ? sizedPicture(picture, width, keepFormat) : like.imageUrl;
+  return picture ? sizedPicture(picture, size) : like.imageUrl;
 };
