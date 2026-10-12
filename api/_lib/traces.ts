@@ -45,12 +45,11 @@ let warnedMissingUrl = false;
 const toJson = (value: unknown) =>
   value === undefined ? null : JSON.stringify(value);
 
-export type EventKind =
-  'cron_run' | 'email' | 'mcp_call' | 'readwise_save' | 'readwise_webhook';
+export type EventKind = 'cron_run' | 'email' | 'mcp_call' | 'readwise_webhook';
 
 /**
  * Records something that happened outside an LLM call in `event_log`, e.g. a
- * save to Readwise, and whether Readwise's webhook then told us about it.
+ * cron run or a Readwise webhook delivery.
  * Like tracing, it never breaks the caller
  */
 export async function logEvent(event: {

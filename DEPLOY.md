@@ -51,10 +51,10 @@ The endpoint has to be live in production first (step 3).
 
 ### 6. Test
 - Terminal chat: visit `https://<your-domain>?mode=terminal`
-- Weekly summary, without sending email or saving to Readwise:
+- Weekly summary, without sending email:
   ```bash
   curl -H "Authorization: Bearer $CRON_SECRET" \
-    "https://<your-domain>/api/weekly-summary?email=false&save=false"
+    "https://<your-domain>/api/weekly-summary?email=false"
   ```
 - Reading synthesis over the last quarter: `dry_run=true` shows how many documents it would cover and roughly how many input tokens, without calling the model; drop it to generate and email
   ```bash

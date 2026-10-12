@@ -3,8 +3,6 @@
  * Documentation: https://readwise.io/reader_api
  */
 
-import { logEvent } from './traces.js';
-
 const READWISE_API_BASE = 'https://readwise.io/api/v3';
 const MAX_RATE_LIMIT_RETRIES = 3;
 
@@ -53,31 +51,6 @@ export interface ArticleListResponse {
   count: number;
   nextPageCursor: string | null;
   results: Article[];
-}
-
-export interface SaveDocumentPayload {
-  url: string;
-  html?: string;
-  should_clean_html?: boolean;
-  title?: string;
-  author?: string;
-  summary?: string;
-  published_date?: string;
-  image_url?: string;
-  location?: Location;
-  category?:
-    | 'article'
-    | 'email'
-    | 'rss'
-    | 'highlight'
-    | 'note'
-    | 'pdf'
-    | 'epub'
-    | 'tweet'
-    | 'video';
-  saved_using?: string;
-  tags?: string[];
-  notes?: string;
 }
 
 export interface UpdateDocumentPayload {
@@ -299,33 +272,4 @@ export async function bulkUpdateTags(
   }
 
   return { updated, failed };
-}
-
-/**
- * Save a new document to Readwise Reader. Each save is logged, so the
- * webhook delivery it should lead to can be checked against it
- */
-export async function saveDocument(
-  payload: SaveDocumentPayload,
-): Promise<{ id: string; url: string }> {
-  const detail = {
-    url: payload.url,
-    title: payload.title,
-    location: payload.location,
-  };
-  try {
-    const saved = await makeRequest<{ id: string; url: string }>('/save/', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    await logEvent({ kind: 'readwise_save', subjectId: saved.id, detail });
-    return saved;
-  } catch (error) {
-    await logEvent({
-      kind: 'readwise_save',
-      detail,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
 }

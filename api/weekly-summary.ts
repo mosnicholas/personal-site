@@ -1,7 +1,7 @@
 import { rejectUnauthorizedCron } from './_lib/auth.js';
 import { documentTexts, ourSummaries } from './_lib/documents.js';
 import { sendReadingEmail } from './_lib/email.js';
-import { fetchArticles, saveDocument } from './_lib/readwise.js';
+import { fetchArticles } from './_lib/readwise.js';
 import {
   generateWeeklySummary,
   WEEKLY_TEXT_BUDGET_CHARS,
@@ -18,7 +18,6 @@ import { describeTraceLog, loggedCron } from './_lib/traces.js';
  * Can also be triggered manually with the same Authorization header and
  * optional query params:
  * - days: Number of days to look back (default: 7, max: 31)
- * - save: Whether to save summary to Readwise (default: true)
  * - email: Whether to send email (default: true)
  */
 
@@ -42,7 +41,6 @@ export default loggedCron('weekly-summary', {
       const requestedDays = Number.parseInt(params.get('days') ?? '', 10) || 7;
       const daysBack = Math.min(Math.max(requestedDays, 1), MAX_DAYS);
       const shouldSendEmail = params.get('email') !== 'false';
-      const shouldSaveToReadwise = params.get('save') !== 'false';
 
       console.log(`Generating weekly summary for last ${daysBack} days`);
 
@@ -78,7 +76,6 @@ export default loggedCron('weekly-summary', {
           success: true,
           articlesProcessed: 0,
           emailSent: false,
-          savedToReadwise: false,
           subject: 'No articles to summarize',
         });
       }
@@ -104,9 +101,8 @@ export default loggedCron('weekly-summary', {
       console.log(`Generated summary with subject: ${summary.subject}`);
 
       let emailSent = false;
-      let savedToReadwise = false;
 
-      // A failed email or save shouldn't fail the whole run
+      // A failed email shouldn't fail the whole run
       if (shouldSendEmail) {
         try {
           // The trace database gives no warning before it fills up, so the
@@ -124,31 +120,10 @@ export default loggedCron('weekly-summary', {
         }
       }
 
-      if (shouldSaveToReadwise) {
-        try {
-          const today = new Date().toISOString().split('T')[0];
-          await saveDocument({
-            url: `https://nimo.fyi/reading-summary/${today}`,
-            title: summary.subject,
-            html: summary.html,
-            should_clean_html: false,
-            category: 'note',
-            location: 'archive',
-            saved_using: 'Weekly Summary Bot',
-            tags: ['weekly-summary', 'reading-notes'],
-          });
-          savedToReadwise = true;
-          console.log('Summary saved to Readwise');
-        } catch (saveError) {
-          console.error('Failed to save to Readwise:', saveError);
-        }
-      }
-
       return Response.json({
         success: true,
         articlesProcessed: articlesToSummarize.length,
         emailSent,
-        savedToReadwise,
         subject: summary.subject,
       });
     } catch (error) {
