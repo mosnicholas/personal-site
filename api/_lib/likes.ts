@@ -262,7 +262,8 @@ export async function redoLike(id: string): Promise<Like | undefined> {
   const [row] = await sql`
     UPDATE likes SET title = '', description = '', category = NULL,
       tags = '{}', image_url = NULL, image_path = NULL, sources = '[]',
-      status = 'pending', error = NULL, attempts = 0, claimed_at = NULL
+      status = 'pending', error = NULL, attempts = 0, claimed_at = NULL,
+      realigned_at = NULL
     WHERE id = ${id}
     RETURNING *`;
   if (old?.image_path) await deletePictures([String(old.image_path)]);

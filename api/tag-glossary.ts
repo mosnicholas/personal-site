@@ -7,11 +7,12 @@ import { loggedCron } from './_lib/traces.js';
  *
  * Triggered by Vercel cron on Sundays at 8am UTC, after the 7am rebalance and
  * before the 9am summary (see vercel.json), with
- * `Authorization: Bearer $CRON_SECRET`. Claude Opus 5.5 defines and clusters
- * every tag, then Claude Sonnet 5.5 writes briefs for tags that have grown
- * (see _lib/glossary.ts). Definitions are skipped if they're under 6 days old,
- * so rerunning by hand only continues the briefs. Options:
- * - redefine: Redo the definitions even if they're recent (default: false)
+ * `Authorization: Bearer $CRON_SECRET`. Claude Opus 5.5 defines the tags that
+ * are new and places them in the existing clusters, then Claude Sonnet 5.5
+ * writes briefs for tags that have grown enough (see _lib/glossary.ts). A full
+ * pass, defining and clustering every tag again, runs when the last one is
+ * over 27 days old. Options:
+ * - redefine: Force the full pass (default: false)
  */
 
 // Vercel stops functions at 300s; a brief in flight can take a minute

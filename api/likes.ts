@@ -37,10 +37,11 @@ import { loggedCron } from './_lib/traces.js';
  *   DELETE `?op=photo&id=&n=` removes photo `n`
  * - POST `?op=login` `{ key }`, POST `?op=logout`
  * - Crons: `?op=process` (daily) enriches likes left waiting; `?op=realign`
- *   (weekly) tidies categories and tags across all of them (_lib/likes-realign.ts);
- *   `?op=digest` (monthly) emails a few old ones
+ *   (weekly) fits the likes saved since the last one into the existing
+ *   categories and tags, and about monthly realigns all of them
+ *   (_lib/likes-realign.ts); `?op=digest` (monthly) emails a few old ones
  * - POST `?op=realign`, signed in: the same realign now; `&dry_run=true`
- *   returns the changes without applying them
+ *   returns the changes without applying them, `&full=true` realigns all
  * - POST `?op=store-pictures`, signed in: moves pictures and photos into
  *   Storage (_lib/likes-pictures.ts); run again until `remaining` is 0
  */
@@ -86,7 +87,10 @@ async function handle(request: Request): Promise<Response> {
   switch (op) {
     case 'realign':
       return Response.json(
-        await realignLikes({ dryRun: params.get('dry_run') === 'true' }),
+        await realignLikes({
+          dryRun: params.get('dry_run') === 'true',
+          full: params.get('full') === 'true',
+        }),
       );
     case 'store-pictures':
       return method === 'POST'
