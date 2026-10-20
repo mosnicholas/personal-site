@@ -2,8 +2,8 @@
  * Fills in each like's title, description, category and tags with Claude
  * Haiku 5.5, which can search the web to pin down what a photo or note is.
  * It runs right after a save, once the response is sent (waitUntil), and
- * daily from the cron for anything left over. Also splits pasted notes into
- * separate likes.
+ * daily from the cron for anything left over. Its picture is picked in
+ * likes-image.ts; pasted notes are split in likes-import.ts.
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
@@ -14,21 +14,15 @@ import {
   claimLikes,
   failLike,
   finishLike,
-  isHttpUrl,
   likeCategories,
   type LikeDetails,
   photoBytes,
-  saveLike,
 } from './likes.js';
 import { getSyncState } from './documents.js';
-import {
-  downloadPicture,
-  type Picture,
-  uploadPicture,
-  USER_AGENT,
-} from './pictures.js';
-import { htmlToText } from './summarize.js';
-import { tracedCall } from './traces.js';
+import { pickImage } from './likes-image.js';
+import { fetchPage } from './likes-pages.js';
+import { type Picture, uploadPicture } from './pictures.js';
+import { tracedCall, withoutImages } from './traces.js';
 import type { Like } from '../../shared/likes.js';
 
 const MODEL = 'claude-haiku-5-5';
@@ -94,155 +88,6 @@ const SAVE_DETAILS: Anthropic.Tool = {
     additionalProperties: false,
   },
 };
-
-const PICK_PROMPT = `Someone saved this to their collection of things they like, and these pictures come from pages about it. Which of them show it? If they singled out one version of it, only pictures of that version. The sharpest of the ones you pick becomes its picture in the collection.`;
-
-const PICK_PICTURES: Anthropic.Tool = {
-  name: 'pick_pictures',
-  description: 'Say which pictures show it.',
-  strict: true,
-  input_schema: {
-    type: 'object',
-    properties: {
-      pictures: {
-        type: 'array',
-        items: { type: 'integer' },
-        description: 'Their numbers; empty if none do',
-      },
-    },
-    required: ['pictures'],
-    additionalProperties: false,
-  },
-};
-
-const SPLIT_PROMPT = `You split notes someone kept about things they like (links, products, places, books, ideas) into the separate things, so each can be saved on its own. Keep their words for each one, and its link if it has one.`;
-
-// Long pastes are split a piece at a time, at paragraph breaks
-const SPLIT_CHUNK_CHARS = 8_000;
-
-interface Page {
-  title: string;
-  description: string;
-  text: string;
-  /** og:image, which some sites set to their own picture on every page */
-  previewImage: string | null;
-  /** The page's first few <img>s */
-  images: string[];
-}
-
-// Pictures shown to Haiku: files under 5 MB once base64-encoded (the API's
-// limit), at least a few KB (smaller ones are icons, flags and spacers), and
-// at most this many and these many bytes in one request
-const MAX_PICTURE_BYTES = 3_700_000;
-const MIN_PICTURE_BYTES = 3_000;
-const MAX_PICTURES = 16;
-const MAX_REQUEST_PICTURE_BYTES = 15_000_000;
-
-/** An <img>'s biggest version: the largest in its srcset, else its src */
-function imgSource(tag: string): string | undefined {
-  const attribute = (name: string) =>
-    tag.match(new RegExp(`\\s${name}\\s*=\\s*["']([^"']+)`, 'i'))?.[1];
-  const largest = attribute('srcset')
-    ?.split(/,\s+/)
-    .map((entry) => {
-      const [url, size = '1x'] = entry.trim().split(/\s+/);
-      return { url, size: parseFloat(size) || 0 };
-    })
-    .sort((a, b) => b.size - a.size)[0]?.url;
-  return largest ?? attribute('src');
-}
-
-/** `<meta>` tags by property or name, e.g. og:image */
-function metaTags(html: string): Map<string, string> {
-  const tags = new Map<string, string>();
-  for (const [tag] of html.matchAll(/<meta\b[^>]*>/gi)) {
-    const attributes = new Map(
-      [...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)].map(
-        ([, name, double, single]) => [name.toLowerCase(), double ?? single],
-      ),
-    );
-    const key = (
-      attributes.get('property') ?? attributes.get('name')
-    )?.toLowerCase();
-    const content = attributes.get('content');
-    if (key && content && !tags.has(key)) tags.set(key, htmlToText(content));
-  }
-  return tags;
-}
-
-/**
- * The linked page's title, description, preview image and text. Many sites
- * turn away servers; then Haiku goes by the link alone
- */
-async function fetchPage(url: string): Promise<Page | undefined> {
-  try {
-    const response = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) return undefined;
-    if (!response.headers.get('content-type')?.includes('html')) {
-      return undefined;
-    }
-    const html = await response.text();
-    const meta = metaTags(html);
-    // An image's absolute URL; null for an SVG (Claude can't read it) or a
-    // src that isn't a web URL
-    const absolute = (src: string) => {
-      try {
-        const resolved = new URL(htmlToText(src), response.url).toString();
-        return isHttpUrl(resolved) && !/\.svg(\?|$)/i.test(resolved)
-          ? resolved
-          : null;
-      } catch {
-        return null;
-      }
-    };
-    const preview = meta.get('og:image') ?? meta.get('twitter:image');
-    const images = [...html.matchAll(/<img\b[^>]*>/gi)]
-      .map(([tag]) => imgSource(tag))
-      .map((src) => (src ? absolute(src) : null))
-      .filter((url): url is string => url !== null);
-    return {
-      title:
-        meta.get('og:title') ??
-        htmlToText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? ''),
-      description: meta.get('og:description') ?? meta.get('description') ?? '',
-      text: htmlToText(html).slice(0, 20_000),
-      previewImage: preview ? absolute(preview) : null,
-      images: [...new Set(images)].slice(0, 5),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-/** A picture from the web, if it loads, is a kind Claude reads, and isn't too big */
-async function loadPicture(
-  url: string,
-): Promise<(Picture & { url: string }) | undefined> {
-  const { picture } = await downloadPicture(url, MAX_PICTURE_BYTES);
-  return picture && { url, ...picture };
-}
-
-/** The request without image bytes, which don't belong in the trace log */
-const withoutImages = <Request extends { messages: Anthropic.MessageParam[] }>(
-  request: Request,
-) => ({
-  ...request,
-  messages: request.messages.map((message) =>
-    typeof message.content === 'string'
-      ? message
-      : {
-          ...message,
-          content: message.content.map((block) =>
-            block.type === 'image'
-              ? { type: 'image', source: '(image)' }
-              : block,
-          ),
-        },
-  ),
-});
 
 /** The save as Haiku sees it: the photos, then the rest as JSON */
 function saveContent(
@@ -371,142 +216,6 @@ async function organize(like: Like, content: Anthropic.ContentBlockParam[]) {
   };
 }
 
-/** The picture chosen for a like, with its bytes if they were loaded */
-interface ChosenImage {
-  url: string;
-  picture?: Picture;
-}
-
-/**
- * The like's image: the sharpest picture that shows it, among the preview
- * images and first few images of the linked page and the source pages. A preview image can be the site's own picture, a page that moved,
- * or another version, so Haiku says which pictures show it; of those, the
- * biggest file is taken to be the sharpest (some sites' are thumbnails).
- * Returns the picture's bytes too when they're at hand, to store it
- */
-async function pickImage(
-  like: Like,
-  details: Pick<LikeDetails, 'title' | 'description' | 'sources'>,
-  page: Page | undefined,
-): Promise<ChosenImage | null> {
-  // With no pick there's only the linked page's own preview image
-  const preview = async (): Promise<ChosenImage | null> => {
-    const url = page?.previewImage;
-    if (!url) return null;
-    const picture = await loadPicture(url);
-    return {
-      url,
-      picture:
-        picture && picture.data.length >= MIN_PICTURE_BYTES
-          ? picture
-          : undefined,
-    };
-  };
-  const sourcePages = await Promise.all(
-    details.sources.slice(0, 5).map((source) => fetchPage(source.url)),
-  );
-  // Most likely to show it first: many stores' preview image is a logo or
-  // missing, but their pages have product photos
-  const urls = [
-    page?.previewImage,
-    ...(page?.images ?? []),
-    ...sourcePages.map((sourcePage) => sourcePage?.previewImage),
-    ...sourcePages.flatMap(
-      (sourcePage) => sourcePage?.images.slice(0, 4) ?? [],
-    ),
-  ].filter((url): url is string => Boolean(url));
-  const loaded = await Promise.all([...new Set(urls)].map(loadPicture));
-  const pictures: (Picture & { url: string })[] = [];
-  let bytes = 0;
-  for (const picture of loaded) {
-    if (!picture || picture.data.length < MIN_PICTURE_BYTES) continue;
-    if (bytes + picture.data.length > MAX_REQUEST_PICTURE_BYTES) continue;
-    pictures.push(picture);
-    bytes += picture.data.length;
-    if (pictures.length === MAX_PICTURES) break;
-  }
-  if (pictures.length === 0) return preview();
-
-  const request = {
-    model: MODEL,
-    max_tokens: 1024,
-    system: PICK_PROMPT,
-    tools: [PICK_PICTURES],
-    tool_choice: { type: 'tool' as const, name: PICK_PICTURES.name },
-    messages: [
-      {
-        role: 'user' as const,
-        content: [
-          ...pictures.flatMap((picture, i) => [
-            { type: 'text' as const, text: `Picture ${i + 1}: ${picture.url}` },
-            {
-              type: 'image' as const,
-              source: {
-                type: 'base64' as const,
-                media_type: picture.type,
-                data: picture.data.toString('base64'),
-              },
-            },
-          ]),
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                title: details.title,
-                description: details.description,
-                note: like.note || undefined,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      },
-    ],
-  };
-  // The trace keeps every candidate (URL, type, size) and the ones Haiku
-  // said show it, so a pick can be checked again later; never the bytes
-  const shownUrls = await tracedCall(
-    {
-      kind: 'likes_enrichment',
-      subjectId: like.id,
-      model: MODEL,
-      request: withoutImages(request),
-    },
-    () => getAnthropic().messages.create(request),
-    (message) => {
-      const call = message.content.find(
-        (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
-      );
-      const numbers =
-        (call?.input as { pictures: number[] } | undefined)?.pictures ?? [];
-      return {
-        candidates: pictures.map(({ url, type, data }) => ({
-          url,
-          type,
-          bytes: data.length,
-        })),
-        shown: pictures
-          .filter((_, i) => numbers.includes(i + 1))
-          .map((picture) => picture.url),
-      };
-    },
-  )
-    .then((result) => result.shown)
-    .catch((error: unknown) => {
-      // An image the API won't take shouldn't cost the like its details. Most
-      // candidates are just pictures on a page
-      console.error(`Could not pick an image for like ${like.id}:`, error);
-      return undefined;
-    });
-  if (!shownUrls) return preview();
-  return (
-    pictures
-      .filter((picture) => shownUrls.includes(picture.url))
-      .sort((a, b) => b.data.length - a.data.length)[0] ?? null
-  );
-}
-
 async function enrichLike(like: Like): Promise<void> {
   try {
     const page = like.url ? await fetchPage(like.url) : undefined;
@@ -591,97 +300,4 @@ export function processLikesLater(): void {
       console.error('Could not process likes:', error);
     }),
   );
-}
-
-/** Pieces of about SPLIT_CHUNK_CHARS, broken between paragraphs */
-function chunks(text: string): string[] {
-  const pieces: string[] = [];
-  let piece = '';
-  for (const paragraph of text.split(/\n\s*\n/)) {
-    if (piece && piece.length + paragraph.length > SPLIT_CHUNK_CHARS) {
-      pieces.push(piece);
-      piece = '';
-    }
-    piece += (piece ? '\n\n' : '') + paragraph;
-  }
-  if (piece.trim()) pieces.push(piece);
-  return pieces;
-}
-
-async function splitNotes(
-  notes: string,
-  subjectId: string,
-): Promise<{ text: string; url: string }[]> {
-  const request = {
-    model: MODEL,
-    max_tokens: 16000,
-    system: SPLIT_PROMPT,
-    messages: [{ role: 'user' as const, content: notes }],
-    output_config: {
-      effort: 'low' as const,
-      format: {
-        type: 'json_schema' as const,
-        schema: {
-          type: 'object',
-          properties: {
-            items: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  text: { type: 'string' },
-                  url: { type: 'string', description: 'Empty if none' },
-                },
-                required: ['text', 'url'],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ['items'],
-          additionalProperties: false,
-        },
-      },
-    },
-  };
-  return tracedCall(
-    { kind: 'likes_import', subjectId, model: MODEL, request },
-    () => getAnthropic().messages.create(request),
-    (response) => {
-      const text = response.content.find((block) => block.type === 'text');
-      if (response.stop_reason !== 'end_turn' || !text) {
-        throw new Error(`Haiku stopped early (${response.stop_reason})`);
-      }
-      return (
-        JSON.parse(text.text) as { items: { text: string; url: string }[] }
-      ).items;
-    },
-  );
-}
-
-/**
- * Splits pasted notes into likes and saves them for enrichment. A piece
- * that can't be split is saved whole, so nothing pasted is lost
- */
-export async function importNotes(notes: string): Promise<Like[]> {
-  const importId = new Date().toISOString();
-  const pieces = await Promise.all(
-    chunks(notes).map((piece, i) =>
-      splitNotes(piece, `${importId}/${i}`).catch((error: unknown) => {
-        console.error('Could not split notes; saving the piece whole:', error);
-        return [{ text: piece, url: '' }];
-      }),
-    ),
-  );
-  const saved: Like[] = [];
-  for (const item of pieces.flat()) {
-    if (!item.text.trim() && !isHttpUrl(item.url)) continue;
-    saved.push(
-      await saveLike({
-        text: item.text,
-        url: isHttpUrl(item.url) ? item.url : undefined,
-        source: 'import',
-      }),
-    );
-  }
-  return saved;
 }

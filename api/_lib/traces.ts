@@ -7,6 +7,8 @@
  * SUPABASE_DATABASE_URL, or if a write fails, it logs and moves on.
  */
 
+import type Anthropic from '@anthropic-ai/sdk';
+
 import { rejectUnauthorizedCron } from './auth.js';
 import { getSql } from './db.js';
 import { PRICE_CHECK_STATE, type PriceCheckState } from './prices-check.js';
@@ -330,3 +332,24 @@ export async function tracedCall<Response, Result>(
     throw error;
   }
 }
+
+/** The request without image bytes, which don't belong in the trace log */
+export const withoutImages = <
+  Request extends { messages: Anthropic.MessageParam[] },
+>(
+  request: Request,
+) => ({
+  ...request,
+  messages: request.messages.map((message) =>
+    typeof message.content === 'string'
+      ? message
+      : {
+          ...message,
+          content: message.content.map((block) =>
+            block.type === 'image'
+              ? { type: 'image', source: '(image)' }
+              : block,
+          ),
+        },
+  ),
+});

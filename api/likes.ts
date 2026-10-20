@@ -3,11 +3,8 @@ import { rejectUnauthorizedCron } from './_lib/auth.js';
 import { isOwner, login, logout, ownerKeyIsSet } from './_lib/owner-auth.js';
 import { sendLikesDigest } from './_lib/likes-digest.js';
 import { realignLikes } from './_lib/likes-realign.js';
-import {
-  importNotes,
-  processLikes,
-  processLikesLater,
-} from './_lib/likes-enrich.js';
+import { processLikes, processLikesLater } from './_lib/likes-enrich.js';
+import { importNotes } from './_lib/likes-import.js';
 import {
   addPhoto,
   deleteLike,
